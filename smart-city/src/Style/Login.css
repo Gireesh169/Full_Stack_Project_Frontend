@@ -1,0 +1,47 @@
+
+.login {
+    display: flex;
+    flex-direction: column;
+    font-family: 'Times New Roman', Times, serif;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+
+    position: relative;
+    overflow: hidden;
+}
+.login h1{
+    color: #ffffff;
+}
+
+.login::before {
+    content: "";
+    position: absolute;
+    width: 100%;
+    height: 100%;
+
+background: url("../assets/smart-city-cover-login.jpeg") no-repeat center/cover;
+
+    filter: blur(8px);
+    transform: scale(1.1);
+    z-index: -1;
+}
+
+.login input {
+    margin: 8px;
+    padding: 10px;
+    width: 250px;
+}
+.login button {
+    padding: 10px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+.login button:hover {
+    background-color: #43463c;
+}
+.login h3{
+    color: #ffffff;
+}
