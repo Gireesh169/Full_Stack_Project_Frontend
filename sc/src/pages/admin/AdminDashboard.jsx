@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import axios from 'axios'
 import { toast } from 'react-toastify'
 import { addCityInfo, deleteCityInfo, getAllCityInfo } from '../../api/cityInfoApi'
 import { getAllComplaints, updateComplaintStatus, deleteComplaint } from '../../api/complaintsApi'
@@ -53,6 +54,7 @@ const AdminDashboard = () => {
     rating: '',
   })
   const [taskForm, setTaskForm] = useState({ complaintId: '', employeeId: '' })
+  const [locationForm, setLocationForm] = useState({ latitude: '', longitude: '', type: 'flood' })
 
   const fetchAllData = async () => {
     setLoading(true)
@@ -128,6 +130,30 @@ const AdminDashboard = () => {
     }
   }
 
+  const handleLocationSubmit = async (event) => {
+    event.preventDefault()
+
+    const latitude = Number(locationForm.latitude)
+    const longitude = Number(locationForm.longitude)
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      toast.error('Latitude and longitude must be valid numbers')
+      return
+    }
+
+    try {
+      await axios.post('http://localhost:8080/api/locations', {
+        latitude,
+        longitude,
+        type: locationForm.type,
+      })
+      toast.success('Location submitted')
+      setLocationForm({ latitude: '', longitude: '', type: 'flood' })
+    } catch {
+      toast.error('Failed to submit location')
+    }
+  }
+
   return (
     <div className="mx-auto grid max-w-7xl gap-6 px-4 py-8 lg:grid-cols-[280px_1fr] sm:px-6">
       <aside className="h-fit rounded-[2rem] border border-white/60 bg-white/50 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] backdrop-blur-xl">
@@ -158,6 +184,45 @@ const AdminDashboard = () => {
                 </div>
 
                 <section>
+                  <h3 className="mb-3 text-lg font-bold text-slate-900">Add Map Location</h3>
+                  <form
+                    onSubmit={handleLocationSubmit}
+                    className="mb-6 grid gap-3 rounded-2xl border border-slate-200 p-4 md:grid-cols-4"
+                  >
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="Latitude"
+                      value={locationForm.latitude}
+                      onChange={(e) => setLocationForm((prev) => ({ ...prev, latitude: e.target.value }))}
+                      className="rounded-xl border border-slate-300 px-3 py-2"
+                      required
+                    />
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="Longitude"
+                      value={locationForm.longitude}
+                      onChange={(e) => setLocationForm((prev) => ({ ...prev, longitude: e.target.value }))}
+                      className="rounded-xl border border-slate-300 px-3 py-2"
+                      required
+                    />
+                    <select
+                      value={locationForm.type}
+                      onChange={(e) => setLocationForm((prev) => ({ ...prev, type: e.target.value }))}
+                      className="rounded-xl border border-slate-300 px-3 py-2"
+                      required
+                    >
+                      <option value="flood">flood</option>
+                      <option value="fire">fire</option>
+                      <option value="accident">accident</option>
+                      <option value="safe">safe</option>
+                    </select>
+                    <button type="submit" className="rounded-xl bg-teal-600 px-4 py-2 font-semibold text-white">
+                      Submit Location
+                    </button>
+                  </form>
+
                   <h3 className="mb-3 text-lg font-bold text-slate-900">Recent Complaints</h3>
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">

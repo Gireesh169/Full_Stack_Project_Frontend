@@ -5,6 +5,7 @@ import { getAllCityInfo } from '../../api/cityInfoApi'
 import { getAllComplaints, postComplaint } from '../../api/complaintsApi'
 import { getPostsFeed } from '../../api/cityPostApi'
 import Loader from '../../components/Loader'
+import MapComponent from '../../components/MapComponent'
 import { useAuth } from '../../context/AuthContext'
 import { formatDateTime } from '../../utils/date'
 import { STATUS_STYLES } from '../../utils/constants'
@@ -110,6 +111,13 @@ const CitizenDashboard = () => {
                       </Link>
                     </div>
                   </div>
+                </div>
+                <div className="space-y-3 rounded-3xl border border-white/50 bg-white/40 p-5 shadow-sm backdrop-blur-md">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">City Safety Map</h3>
+                    <p className="text-sm text-slate-600">Live location markers from the city control backend.</p>
+                  </div>
+                  <MapComponent />
                 </div>
               </div>
             )}

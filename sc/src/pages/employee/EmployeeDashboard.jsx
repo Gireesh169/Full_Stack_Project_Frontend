@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import axios from 'axios'
 import { toast } from 'react-toastify'
 import { getAllEmployees } from '../../api/employeeApi'
 import { getPerformanceByEmployeeId } from '../../api/performanceApi'
@@ -21,6 +22,7 @@ const EmployeeDashboard = () => {
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState([])
   const [performance, setPerformance] = useState(null)
+  const [locationForm, setLocationForm] = useState({ latitude: '', longitude: '', type: 'flood' })
 
   const resolveEmployeeId = useCallback(async () => {
     try {
@@ -77,6 +79,30 @@ const EmployeeDashboard = () => {
     }
   }
 
+  const handleLocationSubmit = async (event) => {
+    event.preventDefault()
+
+    const latitude = Number(locationForm.latitude)
+    const longitude = Number(locationForm.longitude)
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      toast.error('Latitude and longitude must be valid numbers')
+      return
+    }
+
+    try {
+      await axios.post('http://localhost:8080/api/locations', {
+        latitude,
+        longitude,
+        type: locationForm.type,
+      })
+      toast.success('Location submitted')
+      setLocationForm({ latitude: '', longitude: '', type: 'flood' })
+    } catch {
+      toast.error('Failed to submit location')
+    }
+  }
+
   const sidebarClass = (tab) =>
     `w-full rounded-2xl px-4 py-3 text-left text-sm font-bold transition-all ${
       activeTab === tab
@@ -108,6 +134,44 @@ const EmployeeDashboard = () => {
           <>
             {activeTab === 'My Assigned Tasks' && (
               <div className="space-y-4">
+                <form
+                  onSubmit={handleLocationSubmit}
+                  className="grid gap-3 rounded-2xl border border-slate-200 p-4 md:grid-cols-4"
+                >
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Latitude"
+                    value={locationForm.latitude}
+                    onChange={(e) => setLocationForm((prev) => ({ ...prev, latitude: e.target.value }))}
+                    className="rounded-xl border border-slate-300 px-3 py-2"
+                    required
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="Longitude"
+                    value={locationForm.longitude}
+                    onChange={(e) => setLocationForm((prev) => ({ ...prev, longitude: e.target.value }))}
+                    className="rounded-xl border border-slate-300 px-3 py-2"
+                    required
+                  />
+                  <select
+                    value={locationForm.type}
+                    onChange={(e) => setLocationForm((prev) => ({ ...prev, type: e.target.value }))}
+                    className="rounded-xl border border-slate-300 px-3 py-2"
+                    required
+                  >
+                    <option value="flood">flood</option>
+                    <option value="fire">fire</option>
+                    <option value="accident">accident</option>
+                    <option value="safe">safe</option>
+                  </select>
+                  <button type="submit" className="rounded-xl bg-teal-600 px-4 py-2 font-semibold text-white">
+                    Submit Location
+                  </button>
+                </form>
+
                 {tasks.length === 0 ? (
                   <div className="rounded-2xl border border-slate-200 p-8 text-center text-slate-500">
                     No assigned tasks found.
