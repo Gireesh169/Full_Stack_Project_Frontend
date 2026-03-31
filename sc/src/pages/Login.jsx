@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { loginUser, getAllUsers } from '../api/userApi'
+import { getAllEmployees, getEmployeeByUserId } from '../api/employeeApi'
 import { useAuth } from '../context/AuthContext'
 import { ROLE_DASHBOARD } from '../utils/constants'
 
@@ -27,6 +28,37 @@ const Login = () => {
       }
       
       if (!loggedUser) throw new Error('User details not found')
+
+      // Persist user payload under legacy key for components that still read it.
+      localStorage.setItem('user', JSON.stringify(loggedUser))
+      const normalizedRole = String(loggedUser.role ?? '').toLowerCase()
+
+      // If employee, resolve and store the real Employee table ID.
+      if (normalizedRole === 'employee') {
+        try {
+          const { data: employeeByUser } = await getEmployeeByUserId(loggedUser.id)
+          const employee = employeeByUser?.id ? employeeByUser : null
+
+          if (employee?.id) {
+            localStorage.setItem('employeeId', String(employee.id))
+          } else {
+            // Fallback for older backend routes.
+            const { data: employees } = await getAllEmployees()
+            const matched = Array.isArray(employees)
+              ? employees.find((emp) => emp.email?.toLowerCase() === email.toLowerCase())
+              : null
+
+            if (matched?.id) {
+              localStorage.setItem('employeeId', String(matched.id))
+            }
+          }
+        } catch (error) {
+          localStorage.removeItem('employeeId')
+          console.error('Login - Could not resolve employeeId:', error)
+        }
+      } else {
+        localStorage.removeItem('employeeId')
+      }
 
       login(loggedUser)
       toast.success('Logged in successfully')

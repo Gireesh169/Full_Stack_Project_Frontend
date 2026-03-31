@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
 import RoleRoute from './components/RoleRoute'
+import FoodMenu from './components/food/FoodMenu'
 import { useAuth } from './context/AuthContext'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import CitizenDashboard from './pages/citizen/CitizenDashboard'
@@ -43,6 +44,7 @@ function App() {
 
           <Route element={<RoleRoute allowedRoles={['CITIZEN']} />}>
             <Route path="/citizen/dashboard" element={<CitizenDashboard />} />
+            <Route path="/food-menu" element={<FoodMenu />} />
           </Route>
 
           <Route element={<RoleRoute allowedRoles={['ADMIN']} />}>

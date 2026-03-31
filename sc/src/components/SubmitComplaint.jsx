@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
+import ComplaintLocationPicker from './ComplaintLocationPicker'
 
 const TARGET_UPLOAD_BYTES = 900 * 1024
 const MAX_IMAGE_SIDE = 1400
@@ -62,6 +63,7 @@ const SubmitComplaint = ({ onSuccess }) => {
   const [imageFile, setImageFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [location, setLocation] = useState(null)
 
   useEffect(() => {
     if (!imageFile) {
@@ -87,6 +89,11 @@ const SubmitComplaint = ({ onSuccess }) => {
       return
     }
 
+    if (!location) {
+      alert('Please select complaint location on map')
+      return
+    }
+
     const formData = new FormData()
     const uploadFile = await compressImageIfNeeded(imageFile)
 
@@ -98,7 +105,14 @@ const SubmitComplaint = ({ onSuccess }) => {
     formData.append('title', title)
     formData.append('description', description)
     formData.append('place', place)
+    formData.append('address', place)
     formData.append('status', 'PENDING')
+    formData.append('latitude', String(location.lat))
+    formData.append('longitude', String(location.lng))
+    formData.append('lat', String(location.lat))
+    formData.append('lng', String(location.lng))
+    formData.append('locationLatitude', String(location.lat))
+    formData.append('locationLongitude', String(location.lng))
     formData.append('image', uploadFile)
 
     console.log([...formData])
@@ -116,6 +130,7 @@ const SubmitComplaint = ({ onSuccess }) => {
       setDescription('')
       setPlace('')
       setImageFile(null)
+      setLocation(null)
       if (onSuccess) onSuccess()
     } catch (err) {
       console.error(err)
@@ -157,6 +172,9 @@ const SubmitComplaint = ({ onSuccess }) => {
         className="rounded-xl border border-slate-300 px-4 py-2"
         required
       />
+
+      <ComplaintLocationPicker value={location} onChange={setLocation} />
+
       <input
         type="file"
         accept="image/*"

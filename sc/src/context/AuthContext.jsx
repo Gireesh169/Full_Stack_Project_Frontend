@@ -24,6 +24,8 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem(USER_KEY)
+    localStorage.removeItem('employeeId')
+    localStorage.removeItem('user')
     setUser(null)
   }
 

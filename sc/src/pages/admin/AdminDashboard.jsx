@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { addCityInfo, deleteCityInfo, getAllCityInfo } from '../../api/cityInfoApi'
-import { getAllComplaints, updateComplaintStatus, deleteComplaint } from '../../api/complaintsApi'
+import { approveComplaint, getAllComplaints } from '../../api/complaintsApi'
 import { addEmployee, deleteEmployee, getAllEmployees } from '../../api/employeeApi'
 import { getAllPerformance, postPerformance } from '../../api/performanceApi'
 import { getAllPosts } from '../../api/cityPostApi'
-import { deleteTask, getAllTasks, postTaskAssignment, updateTaskStatus } from '../../api/taskApi'
+import { getAllTasks, postTaskAssignment } from '../../api/taskApi'
 import { getAllUsers, deleteUser } from '../../api/userApi'
 import { addWeather, deleteWeather, getAllWeather } from '../../api/weatherApi'
 import { AdminCategoryPie, AdminMonthlyTrendLine } from '../../components/charts/DashboardCharts'
+import AdminOrders from '../../components/admin/AdminOrders'
+import AddFoodItem from '../../components/admin/food/AddFoodItem'
+import AddRestaurant from '../../components/food/AddRestaurant'
 import Loader from '../../components/Loader'
 import MapComponent from '../../components/MapComponent'
 import { useAuth } from '../../context/AuthContext'
@@ -17,18 +20,74 @@ import { formatDateTime } from '../../utils/date'
 
 const tabs = [
   'Dashboard Home',
-  'Complaints Management',
   'Task Assignment',
   'Employee Management',
   'Employee Performance',
   'City Info Management',
   'Weather Management',
+  'Food Management',
+  'Order Management',
   'User Management',
 ]
 
 const renderStars = (rating = 0) => {
   const filled = Math.round(Number(rating))
   return '★★★★★'.slice(0, filled) + '☆☆☆☆☆'.slice(0, 5 - filled)
+}
+
+const getComplaintCoordinates = (complaint) => {
+  const latitude = Number(
+    complaint?.latitude ??
+      complaint?.lat ??
+      complaint?.location?.latitude ??
+      complaint?.location?.lat ??
+      complaint?.geoLocation?.latitude ??
+      complaint?.geoLocation?.lat,
+  )
+  const longitude = Number(
+    complaint?.longitude ??
+      complaint?.lng ??
+      complaint?.location?.longitude ??
+      complaint?.location?.lng ??
+      complaint?.geoLocation?.longitude ??
+      complaint?.geoLocation?.lng,
+  )
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+  return { latitude, longitude }
+}
+
+const getComplaintAddressQuery = (complaint) =>
+  String(
+    complaint?.address ??
+      complaint?.place ??
+      complaint?.location?.address ??
+      complaint?.location?.name ??
+      '',
+  ).trim()
+
+const getStatusValue = (rawStatus) => {
+  if (rawStatus && typeof rawStatus === 'object') {
+    if ('status' in rawStatus) {
+      return String(rawStatus.status ?? 'PENDING').toUpperCase()
+    }
+    return String(rawStatus.value ?? 'PENDING').toUpperCase()
+  }
+
+  if (typeof rawStatus === 'string') {
+    const trimmed = rawStatus.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        return getStatusValue(parsed)
+      } catch {
+        return trimmed.toUpperCase()
+      }
+    }
+    return trimmed.toUpperCase()
+  }
+
+  return String(rawStatus ?? 'PENDING').toUpperCase()
 }
 
 const AdminDashboard = () => {
@@ -55,7 +114,9 @@ const AdminDashboard = () => {
     averageResolutionTime: '',
     rating: '',
   })
-  const [taskForm, setTaskForm] = useState({ complaintId: '', employeeId: '' })
+  const [foodRefreshToken, setFoodRefreshToken] = useState(0)
+  const [assignmentSelection, setAssignmentSelection] = useState({})
+  const [approvingComplaintIds, setApprovingComplaintIds] = useState({})
 
   const fetchAllData = async () => {
     setLoading(true)
@@ -99,18 +160,34 @@ const AdminDashboard = () => {
     fetchAllData()
   }, [])
 
+  useEffect(() => {
+    const handleFocus = () => {
+      if (activeTab === 'Task Assignment') {
+        fetchAllData()
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [activeTab])
+
+  const uniqueComplaints = useMemo(
+    () => Array.from(new Map((complaints ?? []).map((item) => [item.id, item])).values()),
+    [complaints],
+  )
+
   const summaryCards = useMemo(
     () => [
-      { label: 'Total Complaints', value: complaints.length },
+      { label: 'Total Complaints', value: uniqueComplaints.length },
       { label: 'Total Employees', value: employees.length },
       { label: 'Active Tasks', value: tasks.length },
       { label: 'Total Posts', value: posts.length },
     ],
-    [complaints.length, employees.length, tasks.length, posts.length],
+    [uniqueComplaints.length, employees.length, tasks.length, posts.length],
   )
 
   const categoryChartData = useMemo(() => {
-    const counts = complaints.reduce((acc, item) => {
+    const counts = uniqueComplaints.reduce((acc, item) => {
       const raw = item.category ?? item.type ?? item.issueType ?? item.complaintType ?? 'Other'
       const key = String(raw).trim() || 'Other'
       acc[key] = (acc[key] ?? 0) + 1
@@ -118,12 +195,12 @@ const AdminDashboard = () => {
     }, {})
 
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
-  }, [complaints])
+  }, [uniqueComplaints])
 
   const monthlyTrendData = useMemo(() => {
     const monthCounts = new Map()
 
-    complaints.forEach((item) => {
+    uniqueComplaints.forEach((item) => {
       const rawDate = item.createdAt ?? item.created_at ?? item.date ?? item.submittedAt ?? item.time
       if (!rawDate) return
 
@@ -145,12 +222,155 @@ const AdminDashboard = () => {
 
         return { month: label, count }
       })
-  }, [complaints])
+  }, [uniqueComplaints])
 
   const employeeUsers = useMemo(
     () => users.filter((item) => item.role === 'EMPLOYEE'),
     [users],
   )
+
+  const employeeOptions = useMemo(() => {
+    if (employees.length > 0) {
+      return employees.map((item) => ({ id: item.id, name: item.name, email: item.email }))
+    }
+    return employeeUsers.map((item) => ({ id: item.id, name: item.name, email: item.email }))
+  }, [employees, employeeUsers])
+
+  const taskByComplaintId = useMemo(() => {
+    const map = new Map()
+
+    tasks.forEach((task) => {
+      const complaintId = Number(task.complaint?.id)
+      if (!Number.isFinite(complaintId)) return
+
+      const existing = map.get(complaintId)
+      if (!existing) {
+        map.set(complaintId, task)
+        return
+      }
+
+      const currentTime = new Date(task.assignedAt ?? task.updatedAt ?? 0).getTime()
+      const existingTime = new Date(existing.assignedAt ?? existing.updatedAt ?? 0).getTime()
+      if (currentTime >= existingTime) {
+        map.set(complaintId, task)
+      }
+    })
+
+    return map
+  }, [tasks])
+
+  const getComplaintBackendStatus = (item) =>
+    getStatusValue(item.status)
+
+  const getEmployeeLabel = (employeeId) => {
+    if (!employeeId) return 'Unassigned'
+    const matchedEmployee = employees.find((item) => String(item.id) === String(employeeId))
+    if (matchedEmployee) return `${matchedEmployee.name} (${matchedEmployee.email})`
+
+    const matched = employeeOptions.find((item) => String(item.id) === String(employeeId))
+    if (!matched) return `Employee #${employeeId}`
+    return `${matched.name} (${matched.email})`
+  }
+
+  const getAssignedEmployeeLabel = (item) => {
+    const linkedTask = taskByComplaintId.get(Number(item.id))
+    if (linkedTask?.employee) {
+      const name = linkedTask.employee.name ?? `Employee #${linkedTask.employee.id}`
+      const email = linkedTask.employee.email ? ` (${linkedTask.employee.email})` : ''
+      return `${name}${email}`
+    }
+    return getEmployeeLabel(item.assignedEmployeeId)
+  }
+
+  const getAssignedEmployeeName = (item) => {
+    const linkedTask = taskByComplaintId.get(Number(item.id))
+    if (linkedTask?.employee?.name) return linkedTask.employee.name
+
+    const fallbackId = linkedTask?.employee?.id ?? item.assignedEmployeeId
+    if (!fallbackId) return ''
+
+    const matchedEmployee = employees.find((emp) => String(emp.id) === String(fallbackId))
+    if (matchedEmployee?.name) return matchedEmployee.name
+
+    const matchedOption = employeeOptions.find((emp) => String(emp.id) === String(fallbackId))
+    return matchedOption?.name ?? ''
+  }
+
+  const isComplaintAssigned = (item) => {
+    const linkedTask = taskByComplaintId.get(Number(item.id))
+    return Boolean(linkedTask?.employee?.id || item.assignedEmployeeId)
+  }
+
+  const getExistingTaskForComplaint = (complaintId) =>
+    taskByComplaintId.get(Number(complaintId))
+
+  const resolveEmployeeCatalogId = async (selectedEmployeeId) => {
+    const selectedId = String(selectedEmployeeId)
+
+    const existingById = employees.find((item) => String(item.id) === selectedId)
+    if (existingById) return Number(existingById.id)
+
+    const selectedUser = employeeUsers.find((item) => String(item.id) === selectedId)
+    if (!selectedUser) {
+      throw new Error('Invalid employee selection')
+    }
+
+    const existingByEmail = employees.find(
+      (item) => item.email?.toLowerCase() === selectedUser.email?.toLowerCase(),
+    )
+    if (existingByEmail) return Number(existingByEmail.id)
+
+    await addEmployee({ name: selectedUser.name, email: selectedUser.email })
+    const refetchedEmployees = await getAllEmployees()
+    const refreshedList = refetchedEmployees.data ?? []
+    setEmployees(refreshedList)
+
+    const newlyCreated = refreshedList.find(
+      (item) => item.email?.toLowerCase() === selectedUser.email?.toLowerCase(),
+    )
+    if (!newlyCreated) {
+      throw new Error('Employee catalog record not found')
+    }
+
+    return Number(newlyCreated.id)
+  }
+
+  const getComplaintStatusLabel = (item) => {
+    const status = getComplaintBackendStatus(item)
+    if (status === 'RESOLVED' && !item.adminApproved) return 'WAITING_FOR_APPROVAL'
+    return status
+  }
+
+  const canApproveComplaint = (item) =>
+    getComplaintBackendStatus(item) === 'RESOLVED' && !item.adminApproved
+
+  const getApprovalLabel = (item) => {
+    if (item.adminApproved) return 'APPROVED'
+    if (getComplaintBackendStatus(item) === 'RESOLVED') return 'WAITING_FOR_APPROVAL'
+    return 'NOT_READY'
+  }
+
+  const approveComplaintWithValidation = async (complaintId) => {
+    const latestComplaintsResponse = await getAllComplaints()
+    const latestList = latestComplaintsResponse.data ?? []
+    const latestComplaint = latestList.find((item) => Number(item.id) === Number(complaintId))
+
+    if (!latestComplaint) {
+      throw new Error('Complaint not found')
+    }
+
+    const latestStatus = getStatusValue(latestComplaint.status)
+
+    if (latestComplaint.adminApproved) {
+      throw new Error('Already approved by another admin')
+    }
+
+    if (latestStatus !== 'RESOLVED') {
+      throw new Error('Cannot approve before resolved')
+    }
+
+    await approveComplaint(complaintId)
+  }
 
   const sidebarClass = (tab) =>
     `w-full rounded-2xl px-4 py-3 text-left text-sm font-bold transition-all ${
@@ -164,8 +384,20 @@ const AdminDashboard = () => {
       await action()
       toast.success(successMsg)
       fetchAllData()
-    } catch {
-      toast.error(errorMsg)
+    } catch (error) {
+      const rawData = error?.response?.data
+      const backendMessage =
+        (typeof rawData === 'string' ? rawData : null) || rawData?.message || rawData?.error
+      const statusCode = error?.response?.status
+      const fallbackMessage = error?.message
+      const detail = backendMessage || fallbackMessage
+      if (statusCode && detail) {
+        toast.error(`${errorMsg} (${statusCode}): ${detail}`)
+      } else if (detail) {
+        toast.error(`${errorMsg}: ${detail}`)
+      } else {
+        toast.error(errorMsg)
+      }
     }
   }
 
@@ -184,6 +416,22 @@ const AdminDashboard = () => {
     } catch {
       throw new Error('Failed to add location')
     }
+  }
+
+  const handleViewMap = (complaint) => {
+    const coords = getComplaintCoordinates(complaint)
+    if (coords) {
+      window.open(`https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`, '_blank', 'noopener,noreferrer')
+      return
+    }
+
+    const query = getComplaintAddressQuery(complaint)
+    if (!query) {
+      toast.error('Location not available for this complaint')
+      return
+    }
+
+    window.open(`https://www.google.com/maps?q=${encodeURIComponent(query)}`, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -240,12 +488,12 @@ const AdminDashboard = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {complaints.slice(0, 5).map((item) => (
+                        {uniqueComplaints.slice(0, 5).map((item) => (
                           <tr key={item.id} className="border-b border-slate-100">
                             <td className="py-2">{item.id}</td>
                             <td className="py-2">{item.title}</td>
                             <td className="py-2">{item.place}</td>
-                            <td className="py-2">{item.status}</td>
+                            <td className="py-2">{getComplaintStatusLabel(item)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -270,7 +518,7 @@ const AdminDashboard = () => {
                           <tr key={task.id} className="border-b border-slate-100">
                             <td className="py-2">{task.complaint?.title}</td>
                             <td className="py-2">{task.employee?.name}</td>
-                            <td className="py-2">{task.status}</td>
+                            <td className="py-2">{getStatusValue(task.status)}</td>
                             <td className="py-2">{formatDateTime(task.assignedAt)}</td>
                           </tr>
                         ))}
@@ -281,195 +529,146 @@ const AdminDashboard = () => {
               </div>
             )}
 
-            {activeTab === 'Complaints Management' && (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-left text-slate-500">
-                      <th className="py-2">ID</th>
-                      <th className="py-2">Title</th>
-                      <th className="py-2">Place</th>
-                      <th className="py-2">Status</th>
-                      <th className="py-2">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {complaints.map((item) => (
-                      <tr key={item.id} className="border-b border-slate-100">
-                        <td className="py-2">{item.id}</td>
-                        <td className="py-2">{item.title}</td>
-                        <td className="py-2">{item.place}</td>
-                        <td className="py-2">
-                          <select
-                            value={item.status ?? ''}
-                            onChange={(e) =>
-                              runWithRefresh(
-                                () => updateComplaintStatus(item.id, e.target.value),
-                                'Complaint status updated',
-                                'Failed to update complaint status',
-                              )
-                            }
-                            className="rounded-lg border border-slate-300 px-2 py-1"
-                          >
-                            <option value="" disabled>
-                              Select status
-                            </option>
-                            <option value="PENDING">PENDING</option>
-                            <option value="IN_PROGRESS">IN_PROGRESS</option>
-                            <option value="RESOLVED">RESOLVED</option>
-                          </select>
-                        </td>
-                        <td className="py-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              runWithRefresh(
-                                () => deleteComplaint(item.id),
-                                'Complaint deleted',
-                                'Failed to delete complaint',
-                              )
-                            }
-                            className="rounded-lg bg-rose-500 px-3 py-1 text-xs font-semibold text-white"
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
             {activeTab === 'Task Assignment' && (
               <div className="space-y-5">
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault()
-                    if (!taskForm.complaintId || !taskForm.employeeId) {
-                      toast.error('Please select both complaint and employee')
-                      return
-                    }
-
-                    const selectedUser = employeeUsers.find((u) => String(u.id) === String(taskForm.employeeId))
-                    if (!selectedUser) {
-                      toast.error('Invalid employee user selected')
-                      return
-                    }
-
-                    let targetEmployeeId = null
-
-                    const existingEmployee = employees.find(
-                      (emp) => emp.email?.toLowerCase() === selectedUser.email?.toLowerCase()
-                    )
-
-                    if (existingEmployee) {
-                      targetEmployeeId = existingEmployee.id
-                    } else {
-                      try {
-                        await addEmployee({ name: selectedUser.name, email: selectedUser.email })
-                        const refetched = await getAllEmployees()
-                        const newlyCreated = refetched.data.find(
-                          (emp) => emp.email?.toLowerCase() === selectedUser.email?.toLowerCase()
-                        )
-                        if (newlyCreated) targetEmployeeId = newlyCreated.id
-                      } catch (err) {
-                        toast.error('Failed to link employee account in catalog')
-                        return
-                      }
-                    }
-
-                    if (!targetEmployeeId) {
-                      toast.error('Could not resolve Employee Catalog ID')
-                      return
-                    }
-
-                    runWithRefresh(
-                      () => postTaskAssignment(Number(taskForm.complaintId), Number(targetEmployeeId), Number(user.id)),
-                      'Task assigned successfully',
-                      'Task assignment failed',
-                    )
-                  }}
-                  className="grid gap-3 rounded-2xl border border-slate-200 p-4 md:grid-cols-3"
-                >
-                  <select
-                    value={taskForm.complaintId}
-                    onChange={(e) => setTaskForm((prev) => ({ ...prev, complaintId: e.target.value }))}
-                    className="rounded-xl border border-slate-300 px-3 py-2"
-                    required
-                  >
-                    <option value="">Select Complaint</option>
-                    {complaints.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.title}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={taskForm.employeeId}
-                    onChange={(e) => setTaskForm((prev) => ({ ...prev, employeeId: e.target.value }))}
-                    className="rounded-xl border border-slate-300 px-3 py-2"
-                    required
-                  >
-                    <option value="">Select Employee</option>
-                    {employeeUsers.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.name} ({emp.email})
-                      </option>
-                    ))}
-                  </select>
-                  <button type="submit" className="rounded-xl bg-teal-600 px-4 py-2 font-semibold text-white">
-                    Assign
-                  </button>
-                </form>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                  Employee marks complaint as RESOLVED, then Admin must click Approve to finalize for citizen view.
+                </div>
 
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 text-left text-slate-500">
-                        <th className="py-2">Complaint</th>
-                        <th className="py-2">Employee</th>
+                        <th className="py-2">ID</th>
+                        <th className="py-2">Title</th>
+                        <th className="py-2">Place</th>
                         <th className="py-2">Status</th>
-                        <th className="py-2">Assigned At</th>
+                        <th className="py-2">Approval</th>
+                        <th className="py-2">Assigned Employee</th>
                         <th className="py-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {tasks.map((task) => (
-                        <tr key={task.id} className="border-b border-slate-100">
-                          <td className="py-2">{task.complaint?.title}</td>
-                          <td className="py-2">{task.employee?.name}</td>
-                          <td className="py-2">
-                            <select
-                              value={task.status ?? ''}
-                              onChange={(e) =>
-                                runWithRefresh(
-                                  () => updateTaskStatus(task.id, e.target.value),
-                                  'Task status updated',
-                                  'Failed to update task status',
-                                )
-                              }
-                              className="rounded-lg border border-slate-300 px-2 py-1"
-                            >
-                              <option value="" disabled>
-                                Select status
-                              </option>
-                              <option value="PENDING">PENDING</option>
-                              <option value="IN_PROGRESS">IN_PROGRESS</option>
-                              <option value="RESOLVED">RESOLVED</option>
-                            </select>
+                      {uniqueComplaints.map((item) => (
+                        <tr key={item.id} className="border-b border-slate-100">
+                          <td className="py-2">{item.id}</td>
+                          <td className="py-2">{item.title}</td>
+                          <td className="py-2">{item.place}</td>
+                          <td className="py-2 font-semibold text-slate-700">{getComplaintStatusLabel(item)}</td>
+                          <td className="py-2 text-xs font-semibold text-slate-600">
+                            {getApprovalLabel(item).replaceAll('_', ' ')}
                           </td>
-                          <td className="py-2">{formatDateTime(task.assignedAt)}</td>
+                          <td className="py-2 text-slate-600">{getAssignedEmployeeLabel(item)}</td>
                           <td className="py-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                runWithRefresh(() => deleteTask(task.id), 'Task deleted', 'Failed to delete task')
-                              }
-                              className="rounded-lg bg-rose-500 px-3 py-1 text-xs font-semibold text-white"
-                            >
-                              Delete
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={assignmentSelection[item.id] ?? taskByComplaintId.get(Number(item.id))?.employee?.id ?? item.assignedEmployeeId ?? ''}
+                                onChange={(e) =>
+                                  setAssignmentSelection((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.value,
+                                  }))
+                                }
+                                className="rounded-lg border border-slate-300 px-2 py-1"
+                              >
+                                <option value="">Select employee</option>
+                                {employeeOptions.map((emp) => (
+                                  <option key={emp.id} value={emp.id}>
+                                    {emp.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const selectedEmployeeId = Number(
+                                    assignmentSelection[item.id] ??
+                                      taskByComplaintId.get(Number(item.id))?.employee?.id ??
+                                      item.assignedEmployeeId,
+                                  )
+                                  if (!selectedEmployeeId) {
+                                    toast.error('Select an employee before assigning')
+                                    return
+                                  }
+
+                                  const existingTask = getExistingTaskForComplaint(item.id)
+                                  if (existingTask?.id) {
+                                    const existingEmployeeId = Number(existingTask.employee?.id)
+                                    if (existingEmployeeId && existingEmployeeId === selectedEmployeeId) {
+                                      toast.info('Complaint already assigned to this employee')
+                                    } else {
+                                      toast.error('Complaint already assigned. Resolve current assignment before reassigning.')
+                                    }
+                                    return
+                                  }
+
+                                  runWithRefresh(
+                                    async () => {
+                                      const employeeCatalogId = await resolveEmployeeCatalogId(selectedEmployeeId)
+                                      await postTaskAssignment(Number(item.id), employeeCatalogId, Number(user.id))
+                                    },
+                                    'Complaint assigned to employee',
+                                    'Failed to assign complaint',
+                                  )
+                                }}
+                                className="rounded-lg bg-teal-600 px-3 py-1 text-xs font-semibold text-white"
+                              >
+                                Assign
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleViewMap(item)}
+                                className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
+                              >
+                                View Map
+                              </button>
+                              {canApproveComplaint(item) && (
+                                <>
+                                  <span className="text-xs font-semibold text-slate-600">
+                                    {getAssignedEmployeeName(item)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(approvingComplaintIds[item.id])}
+                                    onClick={() =>
+                                      (async () => {
+                                        setApprovingComplaintIds((prev) => ({ ...prev, [item.id]: true }))
+                                        try {
+                                          await runWithRefresh(
+                                            () => approveComplaintWithValidation(item.id),
+                                            'Complaint approved',
+                                            'Failed to approve complaint',
+                                          )
+                                        } finally {
+                                          setApprovingComplaintIds((prev) => ({ ...prev, [item.id]: false }))
+                                        }
+                                      })()
+                                    }
+                                    className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white"
+                                  >
+                                    {approvingComplaintIds[item.id] ? 'Approving...' : 'Approve'}
+                                  </button>
+                                </>
+                              )}
+                              {!item.adminApproved && !canApproveComplaint(item) && isComplaintAssigned(item) && (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="rounded-lg bg-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
+                                >
+                                  WAITING RESOLUTION
+                                </button>
+                              )}
+                              {item.adminApproved && (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="rounded-lg bg-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
+                                >
+                                  APPROVED
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -715,6 +914,15 @@ const AdminDashboard = () => {
                 </div>
               </div>
             )}
+
+            {activeTab === 'Food Management' && (
+              <div className="space-y-4">
+                <AddRestaurant onAdded={() => setFoodRefreshToken((prev) => prev + 1)} />
+                <AddFoodItem refreshToken={foodRefreshToken} />
+              </div>
+            )}
+
+            {activeTab === 'Order Management' && <AdminOrders />}
 
             {activeTab === 'User Management' && (
               <div className="overflow-x-auto">

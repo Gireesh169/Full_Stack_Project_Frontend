@@ -1,6 +1,11 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
+import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet-routing-machine'
+import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
+import { employeeUpdateComplaintStatus } from '../../api/complaintsApi'
 import { getAllEmployees } from '../../api/employeeApi'
 import { getPerformanceByEmployeeId } from '../../api/performanceApi'
 import { getTasksByEmployee, updateTaskStatus } from '../../api/taskApi'
@@ -9,8 +14,65 @@ import Loader from '../../components/Loader'
 import { useAuth } from '../../context/AuthContext'
 import { formatDateTime } from '../../utils/date'
 import { STATUS_STYLES } from '../../utils/constants'
+import EmployeeOrders from '../../components/employee/EmployeeOrders'
 
-const tabs = ['My Assigned Tasks', 'My Performance']
+const tabs = ['My Assigned Tasks', 'My Orders', 'My Performance']
+
+const markerIcon = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+})
+
+const Routing = ({ userLocation, complaintLocation }) => {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!userLocation || !complaintLocation) return undefined
+
+    const routingControl = L.Routing.control({
+      waypoints: [
+        L.latLng(userLocation.lat, userLocation.lng),
+        L.latLng(complaintLocation.lat, complaintLocation.lng),
+      ],
+      routeWhileDragging: false,
+      addWaypoints: false,
+      draggableWaypoints: false,
+      fitSelectedRoutes: true,
+      show: false,
+    }).addTo(map)
+
+    return () => map.removeControl(routingControl)
+  }, [map, userLocation, complaintLocation])
+
+  return null
+}
+
+const getComplaintCoordinates = (complaint) => {
+  const latitude = Number(
+    complaint?.latitude ??
+      complaint?.lat ??
+      complaint?.location?.latitude ??
+      complaint?.location?.lat ??
+      complaint?.geoLocation?.latitude ??
+      complaint?.geoLocation?.lat,
+  )
+  const longitude = Number(
+    complaint?.longitude ??
+      complaint?.lng ??
+      complaint?.location?.longitude ??
+      complaint?.location?.lng ??
+      complaint?.geoLocation?.longitude ??
+      complaint?.geoLocation?.lng,
+  )
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+  return { latitude, longitude }
+}
 
 const renderStars = (rating = 0) => {
   const filled = Math.round(Number(rating))
@@ -22,8 +84,11 @@ const EmployeeDashboard = () => {
   const [activeTab, setActiveTab] = useState('My Assigned Tasks')
   const [loading, setLoading] = useState(true)
   const [tasks, setTasks] = useState([])
+  const [selectedStatuses, setSelectedStatuses] = useState({})
   const [performance, setPerformance] = useState(null)
   const [locationForm, setLocationForm] = useState({ latitude: '', longitude: '', type: 'flood' })
+  const [routeTaskId, setRouteTaskId] = useState(null)
+  const [userLocation, setUserLocation] = useState(null)
 
   const resolveEmployeeId = useCallback(async () => {
     try {
@@ -43,9 +108,7 @@ const EmployeeDashboard = () => {
       const employeeId = await resolveEmployeeId()
 
       const possibleIds = [...new Set([Number(user.id), Number(employeeId)].filter(Boolean))]
-
       const taskResponses = await Promise.allSettled(possibleIds.map((id) => getTasksByEmployee(id)))
-
       const mergedTasks = taskResponses
         .filter((response) => response.status === 'fulfilled')
         .flatMap((response) => response.value.data ?? [])
@@ -56,7 +119,6 @@ const EmployeeDashboard = () => {
       const performanceResponses = await Promise.allSettled(
         possibleIds.map((id) => getPerformanceByEmployeeId(id)),
       )
-
       const firstPerformance = performanceResponses.find((response) => response.status === 'fulfilled')
       setPerformance(firstPerformance?.status === 'fulfilled' ? firstPerformance.value.data : null)
     } catch {
@@ -64,15 +126,30 @@ const EmployeeDashboard = () => {
     } finally {
       setLoading(false)
     }
-  }, [user.id, resolveEmployeeId])
+  }, [resolveEmployeeId, user.id])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
 
-  const handleStatusUpdate = async (taskId, status) => {
+  const handleStatusUpdate = async (taskId) => {
+    const status = selectedStatuses[taskId]
+    if (!status) {
+      toast.error('Select status before submitting')
+      return
+    }
+
     try {
+      const matchedTask = tasks.find((task) => Number(task.id) === Number(taskId))
+      const complaintId = matchedTask?.complaint?.id
+
       await updateTaskStatus(taskId, status)
+
+      // Keep complaint workflow status aligned with task status so admin approval can succeed.
+      if (complaintId) {
+        await employeeUpdateComplaintStatus(complaintId, status)
+      }
+
       toast.success('Task status updated')
       fetchData()
     } catch {
@@ -104,6 +181,32 @@ const EmployeeDashboard = () => {
     }
   }
 
+  const handleShowRoute = (task) => {
+    const complaint = task.complaint
+    const coords = getComplaintCoordinates(complaint)
+    if (!coords) {
+      toast.error('Location not available for this complaint')
+      return
+    }
+
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported in this browser')
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        })
+        setRouteTaskId(task.id)
+      },
+      () => toast.error('Unable to fetch your current location'),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    )
+  }
+
   const sidebarClass = (tab) =>
     `w-full rounded-2xl px-4 py-3 text-left text-sm font-bold transition-all ${
       activeTab === tab
@@ -112,11 +215,12 @@ const EmployeeDashboard = () => {
     }`
 
   const realTotalAssigned = tasks.length
-  const realTotalCompleted = tasks.filter((t) => t.status === 'RESOLVED').length
+  const realTotalCompleted = tasks.filter((item) => item.status === 'RESOLVED').length
   const realRating = realTotalAssigned > 0 ? (realTotalCompleted / realTotalAssigned) * 5 : 0
+
   const employeeTaskChartData = useMemo(() => {
-    const completed = tasks.filter((task) => task.status === 'RESOLVED').length
-    const pending = tasks.filter((task) => task.status === 'PENDING' || task.status === 'IN_PROGRESS').length
+    const completed = tasks.filter((item) => item.status === 'RESOLVED').length
+    const pending = tasks.filter((item) => item.status === 'PENDING' || item.status === 'IN_PROGRESS').length
 
     return [
       { name: 'Completed', count: completed },
@@ -187,26 +291,38 @@ const EmployeeDashboard = () => {
                     No assigned tasks found.
                   </div>
                 ) : (
-                  tasks.map((task) => (
-                  <article key={task.id} className="rounded-2xl border border-slate-200 p-4">
-                    <h3 className="text-lg font-bold text-slate-900">{task.complaint?.title ?? 'Untitled Complaint'}</h3>
-                    <p className="mt-1 text-sm text-slate-600">{task.complaint?.description}</p>
-                    <p className="mt-1 text-sm text-slate-600">Place: {task.complaint?.place}</p>
-                    {task.complaint?.imageUrl && (
+                  tasks.map((item) => (
+                  <article key={item.id} className="rounded-2xl border border-slate-200 p-4">
+                    <h3 className="text-lg font-bold text-slate-900">{item.complaint?.title ?? 'Untitled Complaint'}</h3>
+                    <p className="mt-1 text-sm text-slate-600">{item.complaint?.description}</p>
+                    <p className="mt-1 text-sm text-slate-600">Place: {item.complaint?.place}</p>
+                    {item.complaint?.imageUrl && (
                       <img
-                        src={task.complaint.imageUrl}
-                        alt={task.complaint.title}
+                        src={item.complaint.imageUrl}
+                        alt={item.complaint.title}
                         className="mt-3 h-36 w-full rounded-xl object-cover sm:w-64"
                       />
                     )}
-                    <p className="mt-3 text-xs text-slate-500">Assigned at: {formatDateTime(task.assignedAt)}</p>
+                    <p className="mt-3 text-xs text-slate-500">
+                      Assigned at: {formatDateTime(item.assignedAt)}
+                    </p>
                     <div className="mt-3 flex flex-wrap items-center gap-3">
-                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${STATUS_STYLES[task.status] ?? ''}`}>
-                        {task.status}
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${STATUS_STYLES[item.status] ?? ''}`}>
+                        {item.status}
                       </span>
+                      {item.status === 'RESOLVED' && !item.complaint?.adminApproved && (
+                        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">
+                          Waiting for admin approval
+                        </span>
+                      )}
                       <select
-                        value={task.status ?? ''}
-                        onChange={(e) => handleStatusUpdate(task.id, e.target.value)}
+                        value={selectedStatuses[item.id] ?? item.status ?? ''}
+                        onChange={(e) =>
+                          setSelectedStatuses((prev) => ({
+                            ...prev,
+                            [item.id]: e.target.value,
+                          }))
+                        }
                         className="rounded-lg border border-slate-300 px-3 py-1 text-sm"
                       >
                         <option value="" disabled>
@@ -215,12 +331,69 @@ const EmployeeDashboard = () => {
                         <option value="IN_PROGRESS">IN_PROGRESS</option>
                         <option value="RESOLVED">RESOLVED</option>
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => handleStatusUpdate(item.id)}
+                        className="rounded-lg bg-teal-600 px-3 py-1 text-xs font-semibold text-white"
+                      >
+                        Update Status
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleShowRoute(item)}
+                        className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        Show Route
+                      </button>
+                      {routeTaskId === item.id && (
+                        <button
+                          type="button"
+                          onClick={() => setRouteTaskId(null)}
+                          className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
+                        >
+                          Hide Route
+                        </button>
+                      )}
                     </div>
+                    {routeTaskId === item.id && userLocation && getComplaintCoordinates(item.complaint) && (
+                      <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
+                        <MapContainer
+                          center={[
+                            getComplaintCoordinates(item.complaint).latitude,
+                            getComplaintCoordinates(item.complaint).longitude,
+                          ]}
+                          zoom={13}
+                          className="h-72 w-full"
+                        >
+                          <TileLayer
+                            attribution='&copy; OpenStreetMap contributors'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                          />
+                          <Marker
+                            position={[getComplaintCoordinates(item.complaint).latitude, getComplaintCoordinates(item.complaint).longitude]}
+                            icon={markerIcon}
+                          />
+                          <Marker
+                            position={[userLocation.lat, userLocation.lng]}
+                            icon={markerIcon}
+                          />
+                          <Routing
+                            userLocation={userLocation}
+                            complaintLocation={{
+                              lat: getComplaintCoordinates(item.complaint).latitude,
+                              lng: getComplaintCoordinates(item.complaint).longitude,
+                            }}
+                          />
+                        </MapContainer>
+                      </div>
+                    )}
                   </article>
                   ))
                 )}
               </div>
             )}
+
+            {activeTab === 'My Orders' && <EmployeeOrders />}
 
             {activeTab === 'My Performance' && (
               <div className="space-y-4">

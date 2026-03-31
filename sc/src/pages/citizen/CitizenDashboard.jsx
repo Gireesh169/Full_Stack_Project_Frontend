@@ -7,12 +7,18 @@ import { getPostsFeed } from '../../api/cityPostApi'
 import Loader from '../../components/Loader'
 import MapComponent from '../../components/MapComponent'
 import SubmitComplaint from '../../components/SubmitComplaint'
+import RestaurantList from '../../components/food/RestaurantList'
 import { CitizenComplaintStatusPie } from '../../components/charts/DashboardCharts'
 import { useAuth } from '../../context/AuthContext'
 import { formatDateTime } from '../../utils/date'
 import { STATUS_STYLES } from '../../utils/constants'
 
-const tabs = ['Home', 'Submit Complaint', 'My Complaints', 'City Info', 'City Posts Feed']
+const tabs = ['Home', 'Submit Complaint', 'My Complaints', 'City Info', 'City Posts Feed', 'Food Ordering']
+
+const getCitizenVisibleStatus = (complaint) => {
+  if (!complaint?.adminApproved) return 'WAITING_FOR_APPROVAL'
+  return 'RESOLVED'
+}
 
 const CitizenDashboard = () => {
   const { user } = useAuth()
@@ -83,6 +89,23 @@ const CitizenDashboard = () => {
     fetchData()
   }, [])
 
+  useEffect(() => {
+    if (activeTab === 'My Complaints') {
+      fetchData()
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (activeTab === 'My Complaints') {
+        fetchData()
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [activeTab])
+
   const handleComplaintSuccess = () => {
     toast.success('Complaint submitted successfully')
     fetchData()
@@ -123,18 +146,18 @@ const CitizenDashboard = () => {
   const statusChartData = useMemo(() => {
     const counts = {
       PENDING: 0,
-      IN_PROGRESS: 0,
+      WAITING_FOR_APPROVAL: 0,
       RESOLVED: 0,
     }
 
     complaints.forEach((item) => {
-      const status = String(item.status ?? '').toUpperCase()
+      const status = getCitizenVisibleStatus(item)
       if (counts[status] !== undefined) counts[status] += 1
     })
 
     return [
       { name: 'Pending', value: counts.PENDING },
-      { name: 'In Progress', value: counts.IN_PROGRESS },
+      { name: 'Waiting for Approval', value: counts.WAITING_FOR_APPROVAL },
       { name: 'Resolved', value: counts.RESOLVED },
     ]
   }, [complaints])
@@ -230,6 +253,9 @@ const CitizenDashboard = () => {
             {activeTab === 'My Complaints' && (
               <div className="space-y-3">
                 <h3 className="text-xl font-bold text-slate-900">My Complaints</h3>
+                <p className="text-sm font-medium text-slate-500">
+                  Complaints remain IN REVIEW until admin approval after employee resolution.
+                </p>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
@@ -245,8 +271,10 @@ const CitizenDashboard = () => {
                           <td className="py-2 font-medium text-slate-800">{item.title}</td>
                           <td className="py-2 text-slate-600">{item.place}</td>
                           <td className="py-2">
-                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${STATUS_STYLES[item.status] ?? ''}`}>
-                              {item.status}
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${STATUS_STYLES[getCitizenVisibleStatus(item)] ?? ''}`}
+                            >
+                              {getCitizenVisibleStatus(item).replace('_', ' ')}
                             </span>
                           </td>
                         </tr>
@@ -288,6 +316,8 @@ const CitizenDashboard = () => {
                 </Link>
               </div>
             )}
+
+            {activeTab === 'Food Ordering' && <RestaurantList />}
           </>
         )}
       </main>
