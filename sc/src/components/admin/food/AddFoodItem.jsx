@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
+import { API_BASE_URL } from '../../../api/axiosConfig'
 
 const RESTAURANTS_CACHE_KEY = 'food_restaurants_cache'
 const FOOD_CACHE_KEY = 'food_items_cache'
@@ -182,7 +183,7 @@ const AddFoodItem = ({ refreshToken = 0 }) => {
   const fetchRestaurants = async () => {
       setLoadingRestaurants(true)
       try {
-        const response = await axios.get('http://localhost:8086/restaurants')
+        const response = await axios.get(`${API_BASE_URL}/restaurants`)
         const list = Array.isArray(response.data) ? response.data.map(normalizeRestaurant).filter(Boolean) : []
         if (list.length > 0) {
           setRestaurants(list)
@@ -221,7 +222,7 @@ const AddFoodItem = ({ refreshToken = 0 }) => {
 
     setLoadingFoods(true)
     try {
-      const response = await axios.get(`http://localhost:8086/food?restaurantId=${selectedId}`)
+      const response = await axios.get(`${API_BASE_URL}/food?restaurantId=${selectedId}`)
       const list = Array.isArray(response.data) ? response.data : []
       const normalized = list.map((item, index) => ({
         id: item.id ?? item.foodId ?? `${item.name ?? item.foodName ?? 'item'}-${selectedId}-${index}`,
@@ -280,7 +281,7 @@ const AddFoodItem = ({ refreshToken = 0 }) => {
       formData.append('restaurantId', restaurantId)
       formData.append('image', uploadFile)
 
-      const response = await axios.post('http://localhost:8086/food/create', formData, {
+      const response = await axios.post(`${API_BASE_URL}/food/create`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
 
@@ -354,8 +355,8 @@ const AddFoodItem = ({ refreshToken = 0 }) => {
       if (uploadFile) formData.append('image', uploadFile)
 
       const endpoints = [
-        { method: 'put', url: `http://localhost:8086/food/update/${editingFoodId}` },
-        { method: 'post', url: `http://localhost:8086/food/update/${editingFoodId}` },
+        { method: 'put', url: `${API_BASE_URL}/food/update/${editingFoodId}` },
+        { method: 'post', url: `${API_BASE_URL}/food/update/${editingFoodId}` },
         { method: 'put', url: `/api/food/update/${editingFoodId}` },
         { method: 'post', url: `/api/food/update/${editingFoodId}` },
       ]

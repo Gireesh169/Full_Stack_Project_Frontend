@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
+import { API_BASE_URL } from '../api/axiosConfig'
 import { getPostsByCategory, getPostsByLocation, getPostsFeed, likePost } from '../api/cityPostApi'
 import CreateCityPost from '../components/CreateCityPost'
 import Loader from '../components/Loader'
@@ -153,7 +154,7 @@ const Posts = () => {
                       imageSrc = rawImageUrl
                     }
                   } else {
-                    imageSrc = `http://localhost:8086/${rawImageUrl.replace(/^\/+/, '')}`
+                    imageSrc = `${API_BASE_URL}/${rawImageUrl.replace(/^\/+/, '')}`
                   }
 
                   console.log('IMAGE:', imageSrc)

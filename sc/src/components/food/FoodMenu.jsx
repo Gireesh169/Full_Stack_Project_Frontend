@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { API_BASE_URL } from '../../api/axiosConfig'
 import Cart from './Cart'
 
 const getId = (item) => item?.id ?? item?.foodId ?? item?.itemId
@@ -27,7 +28,7 @@ const FoodMenu = ({ restaurantId: restaurantIdProp }) => {
     const fetchFoodItems = async () => {
       setLoading(true)
       try {
-        const response = await axios.get(`http://localhost:8086/food?restaurantId=${restaurantId}`)
+        const response = await axios.get(`${API_BASE_URL}/food?restaurantId=${restaurantId}`)
         setFoodItems(Array.isArray(response.data) ? response.data : [])
       } catch (error) {
         console.error('Failed to fetch food items:', error)

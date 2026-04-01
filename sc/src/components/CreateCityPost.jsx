@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
+import { API_BASE_URL } from '../api/axiosConfig'
 
 const CreateCityPost = ({ userId, onSuccess, onCancel }) => {
   const [title, setTitle] = useState('')
@@ -30,7 +31,7 @@ const CreateCityPost = ({ userId, onSuccess, onCancel }) => {
     try {
       setLoading(true)
 
-      const response = await axios.post(`http://localhost:8086/posts/create/${userId ?? 1}`, formData, {
+      const response = await axios.post(`${API_BASE_URL}/posts/create/${userId ?? 1}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
 

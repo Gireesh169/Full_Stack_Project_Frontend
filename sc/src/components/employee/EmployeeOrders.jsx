@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { getAllEmployees } from '../../api/employeeApi'
+import { API_BASE_URL } from '../../api/axiosConfig'
 import MapComponent from '../MapComponent'
 
 const EmployeeOrders = () => {
@@ -65,12 +66,12 @@ const EmployeeOrders = () => {
 
     setLoading(true)
     try {
-      const response = await axios.get(`http://localhost:8086/orders/employee/${employeeId}`)
+      const response = await axios.get(`${API_BASE_URL}/orders/employee/${employeeId}`)
       setOrders(Array.isArray(response.data) ? response.data : [])
     } catch (error) {
       // Bonus fallback: if dedicated endpoint fails, use all orders and filter by deliveryEmployee.id
       try {
-        const allResponse = await axios.get('http://localhost:8086/orders')
+        const allResponse = await axios.get(`${API_BASE_URL}/orders`)
         const allOrders = Array.isArray(allResponse.data) ? allResponse.data : []
         const filtered = allOrders.filter(
           (order) =>
@@ -106,7 +107,7 @@ const EmployeeOrders = () => {
     console.log('EmployeeOrders - Updating order:', { orderId, newStatus })
     setUpdatingOrderId(orderId)
     try {
-      const url = `http://localhost:8086/orders/status/${orderId}`
+      const url = `${API_BASE_URL}/orders/status/${orderId}`
       console.log('EmployeeOrders - Status update URL:', url)
 
       await axios.put(url, null, {

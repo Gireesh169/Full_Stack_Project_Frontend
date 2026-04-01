@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
+import { API_BASE_URL } from '../../api/axiosConfig'
 import { addCityInfo, deleteCityInfo, getAllCityInfo } from '../../api/cityInfoApi'
 import { approveComplaint, getAllComplaints } from '../../api/complaintsApi'
 import { addEmployee, deleteEmployee, getAllEmployees } from '../../api/employeeApi'
@@ -404,7 +405,7 @@ const AdminDashboard = () => {
   // NEW: Handle location selection from map
   const handleLocationSelect = async (location) => {
     try {
-      await axios.post('http://localhost:8086/api/locations', {
+      await axios.post(`${API_BASE_URL}/api/locations`, {
         lat: location.lat,
         lng: location.lng,
         latitude: location.lat,

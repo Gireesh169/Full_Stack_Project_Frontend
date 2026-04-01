@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { API_BASE_URL } from '../../api/axiosConfig'
 
 const Cart = ({ cartItems, onClearCart }) => {
   const totalAmount = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -10,7 +11,7 @@ const Cart = ({ cartItems, onClearCart }) => {
     }
 
     try {
-      await axios.post('http://localhost:8086/orders/create', {
+      await axios.post(`${API_BASE_URL}/orders/create`, {
         order: {
           userId: 1,
           totalAmount,

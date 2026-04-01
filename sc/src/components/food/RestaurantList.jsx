@@ -3,6 +3,7 @@ import axios from 'axios'
 import './food-ordering.css'
 import MapComponent from '../MapComponent'
 import { cancelOrder as cancelOrderApi, getUserOrders } from '../../api/orderApi'
+import { API_BASE_URL } from '../../api/axiosConfig'
 
 const getRestaurantId = (restaurant) => restaurant?.id ?? restaurant?.restaurantId
 const RESTAURANTS_CACHE_KEY = 'food_restaurants_cache'
@@ -81,9 +82,9 @@ const RestaurantList = () => {
       setLoading(true)
       try {
         const candidates = [
-          'http://localhost:8086/restaurants',
-          'http://localhost:8086/restaurants/getAll',
-          'http://localhost:8086/restaurants/all',
+          `${API_BASE_URL}/restaurants`,
+          `${API_BASE_URL}/restaurants/getAll`,
+          `${API_BASE_URL}/restaurants/all`,
         ]
 
         for (const url of candidates) {
@@ -232,7 +233,7 @@ const RestaurantList = () => {
     setLoadingFood(true)
 
     try {
-      const response = await axios.get(`http://localhost:8086/food?restaurantId=${id}`)
+      const response = await axios.get(`${API_BASE_URL}/food?restaurantId=${id}`)
       const list = Array.isArray(response.data) ? response.data : []
 
       const normalized = list.map((item, index) => ({
@@ -310,7 +311,7 @@ const RestaurantList = () => {
         return
       }
 
-      const createEndpoints = ['/api/orders/create', 'http://localhost:8086/orders/create']
+      const createEndpoints = ['/api/orders/create', `${API_BASE_URL}/orders/create`]
       let placed = false
       const orderPayload = {
         userId,

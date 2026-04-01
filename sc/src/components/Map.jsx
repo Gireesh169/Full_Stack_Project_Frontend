@@ -1,6 +1,7 @@
 import { GoogleMap, LoadScript, Marker } from "@react-google-maps/api";
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { API_BASE_URL } from "../api/axiosConfig";
 
 const containerStyle = {
   width: "100%",
@@ -21,7 +22,7 @@ export default function MapComponent() {
 
   const fetchLocations = async () => {
     try {
-      const res = await axios.get("http://localhost:8086/api/locations");
+      const res = await axios.get(`${API_BASE_URL}/api/locations`);
       setLocations(res.data);
     } catch (err) {
       console.error(err);

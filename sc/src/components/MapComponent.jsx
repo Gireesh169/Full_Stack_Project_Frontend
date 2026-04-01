@@ -3,6 +3,7 @@ import axios from 'axios'
 import L from 'leaflet'
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { toast } from 'react-toastify'
+import { API_BASE_URL } from '../api/axiosConfig'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-routing-machine'
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
@@ -154,7 +155,7 @@ const MapComponent = ({
     const fetchLocations = async () => {
       setLoading(true)
       try {
-        const { data } = await axios.get('http://localhost:8086/api/locations')
+        const { data } = await axios.get(`${API_BASE_URL}/api/locations`)
         setLocations(Array.isArray(data) ? data : [])
       } catch {
         toast.error('Failed to load map locations')

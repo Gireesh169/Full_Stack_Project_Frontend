@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
+import { API_BASE_URL } from '../../api/axiosConfig'
 import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet-routing-machine'
@@ -168,8 +169,8 @@ const EmployeeDashboard = () => {
       return
     }
 
-    try {
-      await axios.post('http://localhost:8086/api/locations', {
+      try {
+        await axios.post(`${API_BASE_URL}/api/locations`, {
         latitude,
         longitude,
         type: locationForm.type,

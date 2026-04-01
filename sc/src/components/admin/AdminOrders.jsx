@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
+import { API_BASE_URL } from '../../api/axiosConfig'
 
 const AdminOrders = () => {
   const [orders, setOrders] = useState([])
@@ -13,8 +14,8 @@ const AdminOrders = () => {
     setLoading(true)
     try {
       const [ordersRes, employeesRes] = await Promise.all([
-        axios.get('http://localhost:8086/orders'),
-        axios.get('http://localhost:8086/Employee/getAllEmployees'),
+        axios.get(`${API_BASE_URL}/orders`),
+        axios.get(`${API_BASE_URL}/Employee/getAllEmployees`),
       ])
 
       setOrders(Array.isArray(ordersRes.data) ? ordersRes.data : [])
@@ -42,7 +43,7 @@ const AdminOrders = () => {
 
     setAssigningOrderId(orderId)
     try {
-      await axios.put(`http://localhost:8086/orders/assign/${orderId}`, null, {
+      await axios.put(`${API_BASE_URL}/orders/assign/${orderId}`, null, {
         params: { employeeId },
       })
 

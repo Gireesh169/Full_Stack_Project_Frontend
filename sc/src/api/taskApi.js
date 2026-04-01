@@ -1,7 +1,7 @@
 import api from './axiosConfig'
 
 export const postTaskAssignment = (complaintId, employeeId, adminId) =>
-  api.post('http://localhost:8086/taskAssign/post', null, { params: { complaintId, employeeId, adminId } })
+  api.post('/taskAssign/post', null, { params: { complaintId, employeeId, adminId } })
 
 export const updateTaskStatus = (id, status) =>
   api.put(`/taskAssign/update/${id}`, null, { params: { status } })
