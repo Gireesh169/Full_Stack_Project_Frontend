@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import axios from 'axios'
+import './food-ordering.css'
+import MapComponent from '../MapComponent'
+import { cancelOrder as cancelOrderApi, getUserOrders } from '../../api/orderApi'
 
 const getRestaurantId = (restaurant) => restaurant?.id ?? restaurant?.restaurantId
 const RESTAURANTS_CACHE_KEY = 'food_restaurants_cache'
@@ -7,6 +10,16 @@ const FOOD_CACHE_KEY = 'food_items_cache'
 
 const getOrderUserId = (order) => {
   return order?.citizen?.id ?? order?.user?.id ?? order?.citizenId ?? order?.userId ?? order?.user_id
+}
+
+const getOrderStatus = (order) => String(order?.status ?? 'PENDING').toUpperCase()
+
+const getStatusClassName = (status) => {
+  if (status === 'PENDING') return 'food-order-status-pending'
+  if (status === 'ASSIGNED') return 'food-order-status-assigned'
+  if (status === 'DELIVERED') return 'food-order-status-delivered'
+  if (status === 'CANCELLED') return 'food-order-status-cancelled'
+  return 'food-order-status-pending'
 }
 
 const normalizeRestaurant = (raw) => {
@@ -56,6 +69,12 @@ const RestaurantList = () => {
   const [placingOrderId, setPlacingOrderId] = useState(null)
   const [orders, setOrders] = useState([])
   const [loadingOrders, setLoadingOrders] = useState(false)
+  const [ordersError, setOrdersError] = useState('')
+  const [cancellingOrderId, setCancellingOrderId] = useState(null)
+  const [showLocationModal, setShowLocationModal] = useState(false)
+  const [locationDraft, setLocationDraft] = useState(null)
+  const [selectedLocation, setSelectedLocation] = useState(null)
+  const [resolvingAddress, setResolvingAddress] = useState(false)
 
   useEffect(() => {
     const fetchRestaurants = async () => {
@@ -128,45 +147,21 @@ const RestaurantList = () => {
     const user = rawUser ? JSON.parse(rawUser) : null
     if (!user?.id) {
       setOrders([])
+      setOrdersError('')
       return
     }
 
     setLoadingOrders(true)
+    setOrdersError('')
     try {
-      const directEndpoints = [
-        `/api/orders/user/${user.id}`,
-        `http://localhost:8086/orders/user/${user.id}`,
-      ]
-
-      for (const url of directEndpoints) {
-        try {
-          const response = await axios.get(url)
-          const list = Array.isArray(response.data) ? response.data : []
-          setOrders(list)
-          return
-        } catch {
-          // Try next endpoint.
-        }
-      }
-
-      // Fallback: fetch all orders and filter by logged user.
-      const allEndpoints = ['/api/orders', 'http://localhost:8086/orders']
-      for (const url of allEndpoints) {
-        try {
-          const response = await axios.get(url)
-          const list = Array.isArray(response.data) ? response.data : []
-          const filtered = list.filter((order) => String(getOrderUserId(order)) === String(user.id))
-          setOrders(filtered)
-          return
-        } catch {
-          // Try next endpoint.
-        }
-      }
-
-      setOrders([])
+      const response = await getUserOrders(user.id)
+      const list = Array.isArray(response.data) ? response.data : []
+      const filtered = list.filter((order) => String(getOrderUserId(order)) === String(user.id))
+      setOrders(filtered)
     } catch (error) {
       console.error('Failed to fetch user orders:', error)
       setOrders([])
+      setOrdersError('Unable to load your orders right now.')
     } finally {
       setLoadingOrders(false)
     }
@@ -175,6 +170,25 @@ const RestaurantList = () => {
   useEffect(() => {
     fetchUserOrders()
   }, [])
+
+  const handleCancelOrder = async (orderId, status) => {
+    if (status !== 'PENDING') return
+
+    setCancellingOrderId(orderId)
+    try {
+      await cancelOrderApi(orderId)
+      await fetchUserOrders()
+    } catch (error) {
+      console.error('Failed to cancel order:', error)
+      const message =
+        error?.response?.data?.message ||
+        (typeof error?.response?.data === 'string' ? error.response.data : null) ||
+        'Failed to cancel order. Please try again.'
+      alert(message)
+    } finally {
+      setCancellingOrderId(null)
+    }
+  }
 
   const readCachedFood = (restaurant) => {
     const restaurantId = getRestaurantId(restaurant)
@@ -241,6 +255,41 @@ const RestaurantList = () => {
     item.name.toLowerCase().includes(foodSearch.trim().toLowerCase()),
   )
 
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const { data } = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+        params: {
+          format: 'jsonv2',
+          lat,
+          lon: lng,
+        },
+      })
+
+      return data?.display_name || `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`
+    } catch {
+      return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`
+    }
+  }
+
+  const handleLocationPick = async (point) => {
+    const latitude = Number(point?.lat)
+    const longitude = Number(point?.lng)
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return
+    }
+
+    setResolvingAddress(true)
+    try {
+      const address = await reverseGeocode(latitude, longitude)
+      const nextLocation = { lat: latitude, lng: longitude, address }
+      setLocationDraft(nextLocation)
+      setSelectedLocation(nextLocation)
+    } finally {
+      setResolvingAddress(false)
+    }
+  }
+
   const placeOrder = async (item) => {
     if (!selectedRestaurant) return
     setPlacingOrderId(item.id)
@@ -256,17 +305,27 @@ const RestaurantList = () => {
         return
       }
 
+      if (!selectedLocation?.lat || !selectedLocation?.lng || !selectedLocation?.address) {
+        alert('Please select a delivery location before placing the order')
+        return
+      }
+
       const createEndpoints = ['/api/orders/create', 'http://localhost:8086/orders/create']
       let placed = false
+      const orderPayload = {
+        userId,
+        foodId: item.id,
+        latitude: selectedLocation.lat,
+        longitude: selectedLocation.lng,
+        deliveryAddress: selectedLocation.address,
+        restaurantId,
+        totalAmount: item.price,
+      }
 
       for (const url of createEndpoints) {
         try {
           await axios.post(url, null, {
-            params: {
-              userId,
-              restaurantId,
-              totalAmount: item.price,
-            },
+            params: orderPayload,
           })
           placed = true
           break
@@ -294,125 +353,220 @@ const RestaurantList = () => {
   }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold text-slate-900">Restaurants</h2>
+    <div className="food-ordering space-y-5">
+      <h2 className="food-ordering-title">Restaurants</h2>
       {sourceLabel === 'cache' && (
-        <p className="text-xs font-medium text-amber-700">
+        <p className="food-ordering-note">
           Showing locally added restaurants because list API endpoint is unavailable.
         </p>
       )}
 
       {loading ? (
-        <p className="text-sm text-slate-500">Loading restaurants...</p>
+        <p className="food-ordering-muted">Loading restaurants...</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {restaurants.map((restaurant) => {
-            const restaurantId = getRestaurantId(restaurant)
-            const isSelected = String(restaurantId) === String(selectedRestaurantId)
-            return (
-              <div key={restaurantId} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <>
+          <div className="food-restaurant-grid">
+            {restaurants.map((restaurant) => {
+              const restaurantId = getRestaurantId(restaurant)
+              const isSelected = String(restaurantId) === String(selectedRestaurantId)
+              return (
+                <div
+                  key={restaurantId}
+                  className={`food-restaurant-card ${isSelected ? 'food-restaurant-card-active' : ''}`.trim()}
+                >
                 <img
                   src={restaurant.imagePath}
                   alt={restaurant.name ?? 'Restaurant'}
-                  className="h-36 w-full rounded-lg object-cover"
+                  className="food-restaurant-image"
                 />
-                <h3 className="mt-3 text-base font-bold text-slate-900">{restaurant.name}</h3>
+                <h3 className="food-restaurant-name">{restaurant.name}</h3>
                 <button
                   type="button"
                   onClick={() => viewMenu(restaurant)}
-                  className="mt-3 w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+                  className="food-btn-primary"
                 >
-                  View Menu
+                  {isSelected ? 'Menu Open' : 'View Menu'}
                 </button>
 
-                {isSelected && (
-                  <div className="mt-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-sm font-bold text-slate-900">Food Items</h4>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                        {filteredFoodItems.length} items
-                      </span>
-                    </div>
-                    <input
-                      type="text"
-                      value={foodSearch}
-                      onChange={(e) => setFoodSearch(e.target.value)}
-                      placeholder="Search food"
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                    {loadingFood ? (
-                      <p className="text-sm text-slate-500">Loading food items...</p>
-                    ) : filteredFoodItems.length === 0 ? (
-                      <p className="text-sm text-slate-500">No food items found for this restaurant.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {filteredFoodItems.map((item, index) => (
-                          <div
-                            key={`${item.id}-${index}`}
-                            className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
-                          >
-                            <div className="flex items-center gap-3">
-                              <img src={item.imagePath} width="120" alt={item.name} className="rounded-md object-cover" />
-                              <div>
-                                <p className="font-semibold text-slate-900">{item.name}</p>
-                                <p className="text-sm text-slate-600">${Number(item.price).toFixed(2)}</p>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => placeOrder(item)}
-                              disabled={placingOrderId === item.id}
-                              className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                            >
-                              {placingOrderId === item.id ? 'Placing...' : 'Order'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                </div>
+              )
+            })}
+            {restaurants.length === 0 && (
+              <p className="food-ordering-muted">
+                No restaurants found yet. Add one from Admin - Food Management.
+              </p>
+            )}
+          </div>
+
+          {selectedRestaurantId && (
+            <div className="food-items-panel">
+              <div className="food-items-header">
+                <h4 className="food-items-title">Food Items</h4>
+                <span className="food-items-count">
+                  {filteredFoodItems.length} items
+                </span>
               </div>
-            )
-          })}
-          {restaurants.length === 0 && (
-            <p className="text-sm text-slate-500">
-              No restaurants found yet. Add one from Admin - Food Management.
-            </p>
+
+              <div className="food-location-bar">
+                <div className="food-location-info">
+                  <p className="food-location-label">Delivery Location</p>
+                  <p className="food-location-address">
+                    {selectedLocation?.address || 'No location selected. Please choose delivery location.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="food-btn-secondary"
+                  onClick={() => {
+                    setLocationDraft(selectedLocation)
+                    setShowLocationModal(true)
+                  }}
+                >
+                  {selectedLocation ? 'Change Location' : 'Select Location'}
+                </button>
+              </div>
+
+              <p className="food-menu-heading">{selectedRestaurant?.name ?? 'Selected Restaurant'}</p>
+              <input
+                type="text"
+                value={foodSearch}
+                onChange={(e) => setFoodSearch(e.target.value)}
+                placeholder="Search food"
+                className="food-search-input"
+              />
+              {loadingFood ? (
+                <p className="food-ordering-muted">Loading food items...</p>
+              ) : filteredFoodItems.length === 0 ? (
+                <p className="food-ordering-muted">No food items found for this restaurant.</p>
+              ) : (
+                <div className="food-items-list">
+                  {filteredFoodItems.map((item, index) => (
+                    <div
+                      key={`${item.id}-${index}`}
+                      className="food-item-row"
+                    >
+                      <div className="food-item-main">
+                        <img src={item.imagePath} width="120" alt={item.name} className="food-item-image" />
+                        <div className="food-item-info">
+                          <p className="food-item-name">{item.name}</p>
+                          <p className="food-item-price">${Number(item.price).toFixed(2)}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => placeOrder(item)}
+                        disabled={placingOrderId === item.id}
+                        className="food-btn-order"
+                      >
+                        {placingOrderId === item.id ? 'Placing...' : 'Order'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
 
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-base font-bold text-slate-900">My Orders</h3>
+      <div className="food-orders-card">
+        <h3 className="food-orders-title">My Orders</h3>
         {loadingOrders ? (
-          <p className="text-sm text-slate-500">Loading your orders...</p>
+          <p className="food-ordering-muted">Loading your orders...</p>
+        ) : ordersError ? (
+          <p className="food-ordering-muted">{ordersError}</p>
         ) : orders.length === 0 ? (
-          <p className="text-sm text-slate-500">No orders yet.</p>
+          <p className="food-ordering-muted">No orders yet.</p>
         ) : (
-          <div className="space-y-2">
+          <div className="food-orders-list">
             {orders.map((order) => {
-              const status = String(order.status ?? 'PLACED').toUpperCase()
-              const statusClass =
-                status === 'DELIVERED'
-                  ? 'text-emerald-700'
-                  : status === 'ASSIGNED' || status === 'OUT_FOR_DELIVERY'
-                    ? 'text-amber-700'
-                    : 'text-slate-600'
+              const status = getOrderStatus(order)
+              const statusClass = getStatusClassName(status)
 
               return (
-                <div key={order.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-sm font-semibold text-slate-900">Order #{order.id}</p>
-                  <p className="text-sm text-slate-700">Amount: ₹{Number(order.totalAmount ?? 0).toFixed(2)}</p>
-                  <p className={`text-sm ${statusClass}`}>
-                    Status: <b>{status}</b>
+                <div key={order.id} className="food-order-row">
+                  <div className="food-order-top">
+                    <p className="food-order-id">Order #{order.id}</p>
+                    <span className={`food-order-status-badge ${statusClass}`}>{status}</span>
+                  </div>
+                  <p className="food-order-food">Food: {order?.food?.name ?? order?.foodName ?? 'Food item'}</p>
+                  <p className="food-order-amount">Amount: ₹{Number(order.totalAmount ?? 0).toFixed(2)}</p>
+                  <p className="food-order-address">
+                    Delivery: {order.deliveryAddress ?? order.address ?? 'Address unavailable'}
                   </p>
+                  {status === 'PENDING' && (
+                    <button
+                      type="button"
+                      className="food-btn-cancel"
+                      disabled={cancellingOrderId === order.id}
+                      onClick={() => handleCancelOrder(order.id, status)}
+                    >
+                      {cancellingOrderId === order.id ? 'Cancelling...' : 'Cancel Order'}
+                    </button>
+                  )}
                 </div>
               )
             })}
           </div>
         )}
       </div>
+
+      {showLocationModal && (
+        <div className="food-location-modal-backdrop" role="presentation" onClick={() => setShowLocationModal(false)}>
+          <div className="food-location-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="food-location-modal-header">
+              <h4 className="food-location-modal-title">Select Delivery Location</h4>
+              <button
+                type="button"
+                className="food-modal-close"
+                onClick={() => setShowLocationModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <p className="food-ordering-muted">Click on map to set your delivery point.</p>
+            <MapComponent
+              destination={
+                locationDraft
+                  ? { lat: locationDraft.lat, lng: locationDraft.lng }
+                  : null
+              }
+              onLocationSelect={handleLocationPick}
+              onDestinationSelect={handleLocationPick}
+              mapHeight={360}
+            />
+            <div className="food-location-preview">
+              <p className="food-location-label">Selected Address</p>
+              <p className="food-location-address">
+                {resolvingAddress
+                  ? 'Resolving address...'
+                  : locationDraft?.address || 'Click on map to pick location'}
+              </p>
+            </div>
+            <div className="food-location-modal-actions">
+              <button
+                type="button"
+                className="food-btn-secondary"
+                onClick={() => setShowLocationModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="food-btn-primary food-btn-primary-inline"
+                disabled={!locationDraft || resolvingAddress}
+                onClick={() => {
+                  if (!locationDraft) return
+                  setSelectedLocation(locationDraft)
+                  setShowLocationModal(false)
+                }}
+              >
+                Use This Location
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

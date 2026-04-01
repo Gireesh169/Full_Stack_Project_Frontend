@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { getAllCityInfo } from '../../api/cityInfoApi'
-import { getAllComplaints } from '../../api/complaintsApi'
+import { getAllComplaints, updateComplaint } from '../../api/complaintsApi'
 import { getPostsFeed } from '../../api/cityPostApi'
 import Loader from '../../components/Loader'
 import MapComponent from '../../components/MapComponent'
@@ -25,6 +25,7 @@ const CitizenDashboard = () => {
   const [activeTab, setActiveTab] = useState('Home')
   const [loading, setLoading] = useState(true)
   const [complaints, setComplaints] = useState([])
+  const [complaintEdits, setComplaintEdits] = useState({})
   const [cityInfo, setCityInfo] = useState([])
   const [posts, setPosts] = useState([])
   const [destinationInput, setDestinationInput] = useState('')
@@ -85,6 +86,12 @@ const CitizenDashboard = () => {
     }
   }
 
+  const getComplaintDisplayValue = (item, field) => {
+    const edit = complaintEdits[String(item?.id)]
+    if (edit && edit[field] !== undefined) return edit[field]
+    return item?.[field]
+  }
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -110,6 +117,74 @@ const CitizenDashboard = () => {
     toast.success('Complaint submitted successfully')
     fetchData()
     setActiveTab('My Complaints')
+  }
+
+  const handleUpdateComplaint = async (complaint) => {
+    if (getCitizenVisibleStatus(complaint) === 'RESOLVED') {
+      toast.info('Resolved complaints cannot be updated')
+      return
+    }
+
+    const nextTitle = window.prompt('Update title', complaint?.title ?? '')
+    if (nextTitle === null) return
+
+    const nextPlace = window.prompt('Update place', complaint?.place ?? '')
+    if (nextPlace === null) return
+
+    const trimmedTitle = nextTitle.trim()
+    const trimmedPlace = nextPlace.trim()
+
+    if (!trimmedTitle || !trimmedPlace) {
+      toast.error('Title and place are required')
+      return
+    }
+
+    try {
+      const updateResponse = await updateComplaint(complaint.id, {
+        title: trimmedTitle,
+        place: trimmedPlace,
+        description: complaint?.description,
+        status: complaint?.status,
+        latitude: complaint?.latitude,
+        longitude: complaint?.longitude,
+      })
+
+      const responseComplaint = updateResponse?.data
+      const responseId = responseComplaint?.id
+
+      setComplaints((prev) =>
+        prev.map((item) => {
+          const sameOriginalId = String(item.id) === String(complaint.id)
+          const sameResponseId = responseId !== undefined && String(item.id) === String(responseId)
+
+          if (!sameOriginalId && !sameResponseId) return item
+
+          return {
+            ...item,
+            ...responseComplaint,
+            id: item.id,
+            title: trimmedTitle,
+            place: trimmedPlace,
+          }
+        }),
+      )
+
+      setComplaintEdits((prev) => ({
+        ...prev,
+        [String(complaint.id)]: {
+          title: trimmedTitle,
+          place: trimmedPlace,
+        },
+      }))
+
+      toast.success('Complaint updated')
+    } catch (error) {
+      const backendMessage =
+        typeof error?.response?.data === 'string'
+          ? error.response.data
+          : error?.response?.data?.message || error?.response?.data?.error
+      toast.error(backendMessage || 'Failed to update complaint')
+    }
   }
 
   const handleRouteSubmit = async (event) => {
@@ -263,19 +338,30 @@ const CitizenDashboard = () => {
                         <th className="py-2">Title</th>
                         <th className="py-2">Place</th>
                         <th className="py-2">Status</th>
+                        <th className="py-2">Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {complaints.map((item) => (
                         <tr key={item.id} className="border-b border-slate-100">
-                          <td className="py-2 font-medium text-slate-800">{item.title}</td>
-                          <td className="py-2 text-slate-600">{item.place}</td>
+                          <td className="py-2 font-medium text-slate-800">{getComplaintDisplayValue(item, 'title')}</td>
+                          <td className="py-2 text-slate-600">{getComplaintDisplayValue(item, 'place')}</td>
                           <td className="py-2">
                             <span
                               className={`rounded-full px-3 py-1 text-xs font-bold ${STATUS_STYLES[getCitizenVisibleStatus(item)] ?? ''}`}
                             >
                               {getCitizenVisibleStatus(item).replace('_', ' ')}
                             </span>
+                          </td>
+                          <td className="py-2">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateComplaint(item)}
+                              disabled={getCitizenVisibleStatus(item) === 'RESOLVED'}
+                              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Update
+                            </button>
                           </td>
                         </tr>
                       ))}

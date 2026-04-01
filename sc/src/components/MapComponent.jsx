@@ -29,10 +29,16 @@ const userLocationIcon = L.icon({
 
 L.Marker.prototype.setIcon(defaultIcon)
 
-const DestinationClickHandler = ({ onDestinationSelect }) => {
+const DestinationClickHandler = ({ onDestinationSelect, onLocationSelect }) => {
   useMapEvents({
     click: (event) => {
-      onDestinationSelect({ lat: event.latlng.lat, lng: event.latlng.lng })
+      const point = { lat: event.latlng.lat, lng: event.latlng.lng }
+      if (typeof onDestinationSelect === 'function') {
+        onDestinationSelect(point)
+      }
+      if (typeof onLocationSelect === 'function') {
+        onLocationSelect(point)
+      }
     },
   })
   return null
@@ -132,7 +138,13 @@ const RouteLayer = ({ userLocation, destination }) => {
   return null
 }
 
-const MapComponent = ({ destination = null }) => {
+const MapComponent = ({
+  destination = null,
+  onDestinationSelect = null,
+  onLocationSelect = null,
+  readOnly = false,
+  mapHeight = 420,
+}) => {
   const [locations, setLocations] = useState([])
   const [loading, setLoading] = useState(true)
   const [userLocation, setUserLocation] = useState(null)
@@ -213,20 +225,33 @@ const MapComponent = ({ destination = null }) => {
 
   if (loading) {
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-2xl border border-slate-200 bg-white/50 text-sm font-semibold text-slate-600">
+      <div
+        className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white/50 text-sm font-semibold text-slate-600"
+        style={{ height: `${mapHeight}px` }}
+      >
         Loading map...
       </div>
     )
   }
 
   return (
-    <MapContainer center={center} zoom={12} style={{ width: '100%', height: '420px', borderRadius: '1rem' }}>
+    <MapContainer center={center} zoom={12} style={{ width: '100%', height: `${mapHeight}px`, borderRadius: '1rem' }}>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <DestinationClickHandler onDestinationSelect={setClickedDestination} />
+      {!readOnly && (
+        <DestinationClickHandler
+          onLocationSelect={onLocationSelect}
+          onDestinationSelect={(value) => {
+            setClickedDestination(value)
+            if (typeof onDestinationSelect === 'function') {
+              onDestinationSelect(value)
+            }
+          }}
+        />
+      )}
       <FollowUserLocation userLocation={userLocation} />
       <RouteLayer userLocation={routeStart} destination={activeDestination} />
 
