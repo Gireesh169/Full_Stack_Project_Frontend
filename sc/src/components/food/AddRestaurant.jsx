@@ -1,9 +1,8 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import axios from 'axios'
+import { API_BASE_URL } from '../../api/axiosConfig'
 
 const RESTAURANTS_CACHE_KEY = 'food_restaurants_cache'
-const TARGET_UPLOAD_BYTES = 900 * 1024
-const MAX_IMAGE_SIDE = 1400
 
 const normalizeRestaurant = (raw) => {
   if (!raw || typeof raw !== 'object') return null
@@ -19,57 +18,6 @@ const normalizeRestaurant = (raw) => {
   if (!name && !location && !imagePath) return null
 
   return { id, name, location, imagePath }
-}
-
-const loadImageFromFile = (file) =>
-  new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file)
-    const image = new Image()
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl)
-      resolve(image)
-    }
-    image.onerror = (error) => {
-      URL.revokeObjectURL(objectUrl)
-      reject(error)
-    }
-    image.src = objectUrl
-  })
-
-const canvasToBlob = (canvas, quality) =>
-  new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality)
-  })
-
-const compressImageIfNeeded = async (file) => {
-  if (!file || file.size <= TARGET_UPLOAD_BYTES) return file
-
-  const image = await loadImageFromFile(file)
-  const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(image.naturalWidth, image.naturalHeight))
-
-  const width = Math.max(1, Math.round(image.naturalWidth * scale))
-  const height = Math.max(1, Math.round(image.naturalHeight * scale))
-
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-
-  const context = canvas.getContext('2d')
-  if (!context) return file
-  context.drawImage(image, 0, 0, width, height)
-
-  let quality = 0.85
-  let blob = await canvasToBlob(canvas, quality)
-
-  while (blob && blob.size > TARGET_UPLOAD_BYTES && quality > 0.45) {
-    quality -= 0.1
-    blob = await canvasToBlob(canvas, quality)
-  }
-
-  if (!blob) return file
-
-  const safeName = file.name.replace(/\.[^.]+$/, '') || 'upload'
-  return new File([blob], `${safeName}.jpg`, { type: 'image/jpeg' })
 }
 
 const saveRestaurantToCache = (restaurant) => {
@@ -95,45 +43,69 @@ const saveRestaurantToCache = (restaurant) => {
   localStorage.setItem(RESTAURANTS_CACHE_KEY, JSON.stringify(deduped))
 }
 
+const createPlaceholderImageFile = async () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 8
+  canvas.height = 8
+
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Could not prepare image for upload')
+
+  context.fillStyle = '#e2e8f0'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob((fileBlob) => resolve(fileBlob), 'image/png')
+  })
+
+  if (!blob) throw new Error('Could not prepare image for upload')
+  return new File([blob], 'restaurant-placeholder.png', { type: 'image/png' })
+}
+
 const AddRestaurant = ({ onAdded }) => {
   const [name, setName] = useState('')
   const [location, setLocation] = useState('')
-  const [image, setImage] = useState(null)
   const [submitting, setSubmitting] = useState(false)
-  const fileInputRef = useRef(null)
 
   const handleSubmit = async () => {
-    console.log(name, location, image)
-
     if (!name.trim() || !location.trim()) {
       alert('Please enter restaurant name and location')
-      return
-    }
-
-    if (!image) {
-      alert('Please select an image file')
       return
     }
 
     try {
       setSubmitting(true)
       const formData = new FormData()
-      const uploadFile = await compressImageIfNeeded(image)
+      const placeholderImage = await createPlaceholderImageFile()
+      formData.append('name', name.trim())
+      formData.append('location', location.trim())
+      formData.append('image', placeholderImage)
 
-      if (uploadFile.size > TARGET_UPLOAD_BYTES) {
-        alert('Image is too large. Please choose a smaller image.')
-        return
+      const endpoints = [`${API_BASE_URL}/restaurants/create`, '/api/restaurants/create']
+
+      let response = null
+      let lastError = null
+      for (const endpoint of endpoints) {
+        try {
+          response = await axios.post(endpoint, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          })
+          break
+        } catch (requestError) {
+          lastError = requestError
+          const status = requestError?.response?.status
+          if (status && ![400, 404, 405, 415].includes(status)) {
+            break
+          }
+        }
       }
 
-      formData.append('name', name)
-      formData.append('location', location)
-      formData.append('image', uploadFile)
-
-      const response = await axios.post('/api/restaurants/create', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      })
+      if (!response) {
+        if (lastError) throw lastError
+        throw new Error('Restaurant create endpoint is not available')
+      }
 
       saveRestaurantToCache(response.data)
       if (onAdded) onAdded()
@@ -142,8 +114,6 @@ const AddRestaurant = ({ onAdded }) => {
 
       setName('')
       setLocation('')
-      setImage(null)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     } catch (error) {
       console.error(error)
       const backendMessage =
@@ -161,7 +131,7 @@ const AddRestaurant = ({ onAdded }) => {
     <div className="space-y-4 rounded-2xl border border-slate-200 bg-white/60 p-5">
       <h3 className="text-xl font-bold text-slate-900">Add Restaurant</h3>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         <input
           type="text"
           placeholder="Restaurant name"
@@ -175,14 +145,6 @@ const AddRestaurant = ({ onAdded }) => {
           placeholder="Location"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
-          className="rounded-xl border border-slate-300 px-3 py-2"
-        />
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={(e) => setImage(e.target.files?.[0] ?? null)}
           className="rounded-xl border border-slate-300 px-3 py-2"
         />
       </div>
