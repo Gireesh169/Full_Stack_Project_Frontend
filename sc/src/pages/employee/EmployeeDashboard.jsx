@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
-import { API_BASE_URL } from '../../api/axiosConfig'
+import { API_BASE_URL, IMAGE_BASE_URL } from '../../api/axiosConfig'
 import { employeeUpdateComplaintStatus } from '../../api/complaintsApi'
 import { getAllEmployees } from '../../api/employeeApi'
 import { getEmployeeByUserId } from '../../api/employeeApi'
@@ -50,6 +50,34 @@ const getComplaintCoordinates = (complaint) => {
 const renderStars = (rating = 0) => {
   const filled = Math.round(Number(rating))
   return '★★★★★'.slice(0, filled) + '☆☆☆☆☆'.slice(0, 5 - filled)
+}
+
+const resolveComplaintImageSrc = (complaint) => {
+  const rawImageUrl = String(complaint?.imageUrl ?? complaint?.imagePath ?? complaint?.image ?? '').trim()
+  if (!rawImageUrl) return ''
+
+  if (rawImageUrl.startsWith('http')) {
+    try {
+      const parsedUrl = new URL(rawImageUrl)
+      const apiOrigin = new URL(IMAGE_BASE_URL)
+
+      if (['localhost', '127.0.0.1', '::1'].includes(parsedUrl.hostname)) {
+        parsedUrl.protocol = apiOrigin.protocol
+        parsedUrl.hostname = apiOrigin.hostname
+        parsedUrl.port = apiOrigin.port
+        return parsedUrl.toString()
+      }
+    } catch {
+      return rawImageUrl
+    }
+  }
+
+  const normalizedPath = rawImageUrl.replace(/^\/+/, '')
+  try {
+    return new URL(normalizedPath, IMAGE_BASE_URL).toString()
+  } catch {
+    return `${IMAGE_BASE_URL}/${normalizedPath}`
+  }
 }
 
 const EmployeeDashboard = () => {
@@ -299,11 +327,16 @@ const EmployeeDashboard = () => {
                     <h3 className="text-lg font-bold text-slate-900">{item.complaint?.title ?? 'Untitled Complaint'}</h3>
                     <p className="mt-1 text-sm text-slate-600">{item.complaint?.description}</p>
                     <p className="mt-1 text-sm text-slate-600">Place: {item.complaint?.place}</p>
-                    {item.complaint?.imageUrl && (
+                    {resolveComplaintImageSrc(item.complaint) && (
                       <img
-                        src={item.complaint.imageUrl}
+                        src={resolveComplaintImageSrc(item.complaint)}
                         alt={item.complaint.title}
                         className="mt-3 h-36 w-full rounded-xl object-cover sm:w-64"
+                        onError={(event) => {
+                          event.currentTarget.onerror = null
+                          event.currentTarget.src =
+                            'data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'800\' height=\'420\' viewBox=\'0 0 800 420\'%3E%3Crect width=\'800\' height=\'420\' fill=\'%23e2e8f0\'/%3E%3Ctext x=\'400\' y=\'220\' text-anchor=\'middle\' font-family=\'Arial, sans-serif\' font-size=\'30\' font-weight=\'700\' fill=\'%23475569\'%3EImage unavailable%3C/text%3E%3C/svg%3E'
+                        }}
                       />
                     )}
                     <p className="mt-3 text-xs text-slate-500">
