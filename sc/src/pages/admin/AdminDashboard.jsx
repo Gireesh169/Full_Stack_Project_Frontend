@@ -341,19 +341,24 @@ const AdminDashboard = () => {
     )
     if (existingByEmail) return Number(existingByEmail.id)
 
-    await addEmployee({ name: selectedUser.name, email: selectedUser.email })
-    const refetchedEmployees = await getAllEmployees()
-    const refreshedList = refetchedEmployees.data ?? []
-    setEmployees(refreshedList)
+    try {
+      await addEmployee({ name: selectedUser.name, email: selectedUser.email })
+      const refetchedEmployees = await getAllEmployees()
+      const refreshedList = refetchedEmployees.data ?? []
+      setEmployees(refreshedList)
 
-    const newlyCreated = refreshedList.find(
-      (item) => item.email?.toLowerCase() === selectedUser.email?.toLowerCase(),
-    )
-    if (!newlyCreated) {
-      throw new Error('Employee catalog record not found')
+      const newlyCreated = refreshedList.find(
+        (item) => item.email?.toLowerCase() === selectedUser.email?.toLowerCase(),
+      )
+      if (newlyCreated?.id) {
+        return Number(newlyCreated.id)
+      }
+    } catch {
+      // Deployment fallback: some backends disable Employee catalog write routes.
+      // Continue with selected EMPLOYEE user id so assignment can still be created.
     }
 
-    return Number(newlyCreated.id)
+    return Number(selectedUser.id)
   }
 
   const getComplaintStatusLabel = (item) => {
