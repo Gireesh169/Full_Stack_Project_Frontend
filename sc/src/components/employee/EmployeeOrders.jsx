@@ -1,16 +1,56 @@
 import { useEffect, useState, useCallback } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
-import { getAllEmployees } from '../../api/employeeApi'
+import { getAllEmployees, getEmployeeByUserId } from '../../api/employeeApi'
 import { API_BASE_URL } from '../../api/axiosConfig'
 import MapComponent from '../MapComponent'
+import { useAuth } from '../../context/AuthContext'
 
 const EmployeeOrders = () => {
+  const { user: authUser } = useAuth()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [updatingOrderId, setUpdatingOrderId] = useState(null)
   const [employeeId, setEmployeeId] = useState(() => localStorage.getItem('employeeId'))
   const [selectedMapOrder, setSelectedMapOrder] = useState(null)
+  const [startedDeliveryIds, setStartedDeliveryIds] = useState([])
+
+  const isOrderAssignedToEmployee = useCallback(
+    (order) => {
+      const employeeIds = [
+        order?.deliveryEmployee?.id,
+        order?.assignedEmployee?.id,
+        order?.delivery_employee_id,
+        order?.deliveryEmployeeId,
+        order?.assignedEmployeeId,
+        order?.employeeId,
+        order?.employee?.id,
+      ]
+
+      return employeeIds.some((value) => String(value ?? '') === String(employeeId ?? ''))
+    },
+    [employeeId],
+  )
+
+  const isAssignedOrder = (order) => {
+    const status = String(order?.status ?? order?.orderStatus ?? '').toUpperCase()
+    const assignedEmployeeIds = [
+      order?.deliveryEmployee?.id,
+      order?.assignedEmployee?.id,
+      order?.delivery_employee_id,
+      order?.deliveryEmployeeId,
+      order?.assignedEmployeeId,
+      order?.employeeId,
+      order?.employee?.id,
+    ]
+
+    return (
+      status === 'ASSIGNED' ||
+      status === 'IN_PROGRESS' ||
+      status === 'OUT_FOR_DELIVERY' ||
+      assignedEmployeeIds.some((value) => value !== null && value !== undefined)
+    )
+  }
 
   useEffect(() => {
     const resolveEmployeeId = async () => {
@@ -22,9 +62,39 @@ const EmployeeOrders = () => {
       }
 
       try {
+        if (authUser?.id) {
+          try {
+            const { data: employeeByUser } = await getEmployeeByUserId(authUser.id)
+            if (employeeByUser?.id) {
+              const resolvedId = String(employeeByUser.id)
+              localStorage.setItem('employeeId', resolvedId)
+              console.log('Employee ID:', resolvedId)
+              setEmployeeId(resolvedId)
+              return
+            }
+          } catch {
+            // Fallback below.
+          }
+        }
+
         const rawUser = localStorage.getItem('smartcity_user') || localStorage.getItem('user')
-        const loggedUser = rawUser ? JSON.parse(rawUser) : null
+        const loggedUser = rawUser ? JSON.parse(rawUser) : authUser ?? null
         const userEmail = loggedUser?.email?.toLowerCase()
+
+        if (loggedUser?.id) {
+          try {
+            const { data: employeeByUser } = await getEmployeeByUserId(loggedUser.id)
+            if (employeeByUser?.id) {
+              const resolvedId = String(employeeByUser.id)
+              localStorage.setItem('employeeId', resolvedId)
+              console.log('Employee ID:', resolvedId)
+              setEmployeeId(resolvedId)
+              return
+            }
+          } catch {
+            // Fallback below.
+          }
+        }
 
         if (!userEmail) {
           console.log('Employee ID: null')
@@ -67,18 +137,20 @@ const EmployeeOrders = () => {
     setLoading(true)
     try {
       const response = await axios.get(`${API_BASE_URL}/orders/employee/${employeeId}`)
-      setOrders(Array.isArray(response.data) ? response.data : [])
+      const apiOrders = Array.isArray(response.data) ? response.data : []
+      if (apiOrders.length > 0) {
+        setOrders(apiOrders)
+        return
+      }
+
+      throw new Error('Empty employee order response')
     } catch (error) {
-      // Bonus fallback: if dedicated endpoint fails, use all orders and filter by deliveryEmployee.id
+      // Fallback: if dedicated endpoint fails or returns empty, show all assigned delivery orders.
       try {
         const allResponse = await axios.get(`${API_BASE_URL}/orders`)
         const allOrders = Array.isArray(allResponse.data) ? allResponse.data : []
-        const filtered = allOrders.filter(
-          (order) =>
-            String(order?.deliveryEmployee?.id) === String(employeeId) ||
-            String(order?.delivery_employee_id) === String(employeeId),
-        )
-        setOrders(filtered)
+        const filtered = allOrders.filter(isOrderAssignedToEmployee)
+        setOrders(filtered.length > 0 ? filtered : allOrders.filter(isAssignedOrder))
       } catch (fallbackError) {
         console.error('EmployeeOrders - Failed to load orders:', fallbackError)
         const backendMessage =
@@ -108,10 +180,8 @@ const EmployeeOrders = () => {
     setUpdatingOrderId(orderId)
     try {
       const url = `${API_BASE_URL}/orders/status/${orderId}`
-      console.log('EmployeeOrders - Status update URL:', url)
-
       await axios.put(url, null, {
-        params: { status: newStatus },
+        params: { status: String(newStatus).toUpperCase() },
       })
 
       console.log('EmployeeOrders - Status updated successfully')
@@ -122,6 +192,7 @@ const EmployeeOrders = () => {
       console.error('EmployeeOrders - Failed to update order status:', error)
       const backendMessage =
         error?.response?.data?.message ||
+        error?.response?.data?.error ||
         (typeof error?.response?.data === 'string' ? error.response.data : null) ||
         'Failed to update status'
       toast.error(backendMessage)
@@ -155,16 +226,6 @@ const EmployeeOrders = () => {
     return { lat, lng }
   }
 
-  const canStartDelivery = (status) => {
-    const s = String(status).toUpperCase()
-    return s === 'PENDING' || s === 'ASSIGNED'
-  }
-
-  const canMarkDelivered = (status) => {
-    const s = String(status).toUpperCase()
-    return s === 'OUT_FOR_DELIVERY' || s === 'OUT FOR DELIVERY'
-  }
-
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold text-slate-900">My Orders For Delivery</h2>
@@ -185,6 +246,9 @@ const EmployeeOrders = () => {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {orders.map((order) => {
             const status = getOrderStatus(order).toUpperCase()
+            const hasStartedDelivery = startedDeliveryIds.includes(order.id)
+            const showStartDelivery = status === 'ASSIGNED' && !hasStartedDelivery
+            const showMarkDelivered = status === 'DELIVERED' || hasStartedDelivery
             return (
               <div key={order.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-start justify-between">
@@ -225,18 +289,22 @@ const EmployeeOrders = () => {
                     </button>
                   )}
 
-                  {canStartDelivery(status) && (
+                  {showStartDelivery && (
                     <button
                       type="button"
-                      onClick={() => updateStatus(order.id, 'OUT_FOR_DELIVERY')}
-                      disabled={updatingOrderId === order.id}
+                      onClick={() => {
+                        setStartedDeliveryIds((prev) =>
+                          prev.includes(order.id) ? prev : [...prev, order.id],
+                        )
+                        toast.success('Delivery started')
+                      }}
                       className="flex-1 rounded-lg bg-yellow-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
                     >
-                      {updatingOrderId === order.id ? 'Updating...' : 'Start Delivery'}
+                      Start Delivery
                     </button>
                   )}
 
-                  {canMarkDelivered(status) && (
+                  {showMarkDelivered && (
                     <button
                       type="button"
                       onClick={() => updateStatus(order.id, 'DELIVERED')}

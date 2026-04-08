@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import axios from 'axios'
 import ComplaintLocationPicker from './ComplaintLocationPicker'
+import { postComplaint } from '../api/complaintsApi'
 
 const TARGET_UPLOAD_BYTES = 450 * 1024
 const MAX_IMAGE_SIDE = 1400
@@ -175,10 +175,10 @@ const SubmitComplaint = ({ onSuccess }) => {
 
       if (uploadFile) {
         try {
-          response = await axios.post('/api/complaints/posting', formDataWithOptionalImage)
+          response = await postComplaint(formDataWithOptionalImage)
         } catch (err) {
           if (err?.response?.status === 413) {
-            response = await axios.post('/api/complaints/posting', formDataWithoutImage)
+            response = await postComplaint(formDataWithoutImage)
 
             alert('Complaint submitted without image because image exceeded server limit.')
           } else {
@@ -186,7 +186,7 @@ const SubmitComplaint = ({ onSuccess }) => {
           }
         }
       } else {
-        response = await axios.post('/api/complaints/posting', formDataWithoutImage)
+        response = await postComplaint(formDataWithoutImage)
       }
 
       alert('Upload successful')

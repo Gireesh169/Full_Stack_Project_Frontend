@@ -118,8 +118,9 @@ const RouteLayer = ({ userLocation, destination }) => {
           return
         }
 
+        // Keep the map usable even if external routing APIs are unavailable.
         if (!hasErrorNotifiedRef.current) {
-          toast.error('Unable to draw road route right now. Try again in a moment.')
+          console.warn('Routing services unavailable; showing map without road path.')
           hasErrorNotifiedRef.current = true
         }
       })

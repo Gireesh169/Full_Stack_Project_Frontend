@@ -2,12 +2,9 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import { API_BASE_URL } from '../../api/axiosConfig'
-import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet-routing-machine'
-import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
 import { employeeUpdateComplaintStatus } from '../../api/complaintsApi'
 import { getAllEmployees } from '../../api/employeeApi'
+import { getEmployeeByUserId } from '../../api/employeeApi'
 import { getPerformanceByEmployeeId } from '../../api/performanceApi'
 import { getTasksByEmployee, updateTaskStatus } from '../../api/taskApi'
 import { EmployeeTaskBar } from '../../components/charts/DashboardCharts'
@@ -16,42 +13,9 @@ import { useAuth } from '../../context/AuthContext'
 import { formatDateTime } from '../../utils/date'
 import { STATUS_STYLES } from '../../utils/constants'
 import EmployeeOrders from '../../components/employee/EmployeeOrders'
+import MapComponent from '../../components/MapComponent'
 
 const tabs = ['My Assigned Tasks', 'My Orders', 'My Performance']
-
-const markerIcon = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-})
-
-const Routing = ({ userLocation, complaintLocation }) => {
-  const map = useMap()
-
-  useEffect(() => {
-    if (!userLocation || !complaintLocation) return undefined
-
-    const routingControl = L.Routing.control({
-      waypoints: [
-        L.latLng(userLocation.lat, userLocation.lng),
-        L.latLng(complaintLocation.lat, complaintLocation.lng),
-      ],
-      routeWhileDragging: false,
-      addWaypoints: false,
-      draggableWaypoints: false,
-      fitSelectedRoutes: true,
-      show: false,
-    }).addTo(map)
-
-    return () => map.removeControl(routingControl)
-  }, [map, userLocation, complaintLocation])
-
-  return null
-}
 
 const getComplaintCoordinates = (complaint) => {
   const latitude = Number(
@@ -60,7 +24,11 @@ const getComplaintCoordinates = (complaint) => {
       complaint?.location?.latitude ??
       complaint?.location?.lat ??
       complaint?.geoLocation?.latitude ??
-      complaint?.geoLocation?.lat,
+      complaint?.geoLocation?.lat ??
+      complaint?.coordinates?.latitude ??
+      complaint?.coordinates?.lat ??
+      complaint?.mapLocation?.latitude ??
+      complaint?.mapLocation?.lat,
   )
   const longitude = Number(
     complaint?.longitude ??
@@ -68,7 +36,11 @@ const getComplaintCoordinates = (complaint) => {
       complaint?.location?.longitude ??
       complaint?.location?.lng ??
       complaint?.geoLocation?.longitude ??
-      complaint?.geoLocation?.lng,
+      complaint?.geoLocation?.lng ??
+      complaint?.coordinates?.longitude ??
+      complaint?.coordinates?.lng ??
+      complaint?.mapLocation?.longitude ??
+      complaint?.mapLocation?.lng,
   )
 
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
@@ -88,11 +60,15 @@ const EmployeeDashboard = () => {
   const [selectedStatuses, setSelectedStatuses] = useState({})
   const [performance, setPerformance] = useState(null)
   const [locationForm, setLocationForm] = useState({ latitude: '', longitude: '', type: 'flood' })
-  const [routeTaskId, setRouteTaskId] = useState(null)
-  const [userLocation, setUserLocation] = useState(null)
 
   const resolveEmployeeId = useCallback(async () => {
     try {
+      const employeeByUser = await getEmployeeByUserId(user.id)
+      const employeeRecord = employeeByUser?.data
+      if (employeeRecord?.id) {
+        return employeeRecord.id
+      }
+
       const { data } = await getAllEmployees()
       const matchedEmployee = data.find(
         (employee) => employee.email?.toLowerCase() === user.email?.toLowerCase(),
@@ -108,7 +84,7 @@ const EmployeeDashboard = () => {
     try {
       const employeeId = await resolveEmployeeId()
 
-      const possibleIds = [...new Set([Number(user.id), Number(employeeId)].filter(Boolean))]
+      const possibleIds = [...new Set([Number(employeeId), Number(user.id)].filter(Boolean))]
       const taskResponses = await Promise.allSettled(possibleIds.map((id) => getTasksByEmployee(id)))
       const mergedTasks = taskResponses
         .filter((response) => response.status === 'fulfilled')
@@ -180,32 +156,6 @@ const EmployeeDashboard = () => {
     } catch {
       toast.error('Failed to submit location')
     }
-  }
-
-  const handleShowRoute = (task) => {
-    const complaint = task.complaint
-    const coords = getComplaintCoordinates(complaint)
-    if (!coords) {
-      toast.error('Location not available for this complaint')
-      return
-    }
-
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported in this browser')
-      return
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        })
-        setRouteTaskId(task.id)
-      },
-      () => toast.error('Unable to fetch your current location'),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-    )
   }
 
   const sidebarClass = (tab) =>
@@ -341,52 +291,29 @@ const EmployeeDashboard = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleShowRoute(item)}
+                        onClick={() => {
+                          if (!getComplaintCoordinates(item.complaint)) {
+                            toast.error('Location not available for this complaint')
+                          }
+                        }}
                         className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
                       >
-                        Show Route
+                        Complaint Map
                       </button>
-                      {routeTaskId === item.id && (
-                        <button
-                          type="button"
-                          onClick={() => setRouteTaskId(null)}
-                          className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
-                        >
-                          Hide Route
-                        </button>
-                      )}
                     </div>
-                    {routeTaskId === item.id && userLocation && getComplaintCoordinates(item.complaint) && (
+                    {getComplaintCoordinates(item.complaint) ? (
                       <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
-                        <MapContainer
-                          center={[
-                            getComplaintCoordinates(item.complaint).latitude,
-                            getComplaintCoordinates(item.complaint).longitude,
-                          ]}
-                          zoom={13}
-                          className="h-72 w-full"
-                        >
-                          <TileLayer
-                            attribution='&copy; OpenStreetMap contributors'
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                          />
-                          <Marker
-                            position={[getComplaintCoordinates(item.complaint).latitude, getComplaintCoordinates(item.complaint).longitude]}
-                            icon={markerIcon}
-                          />
-                          <Marker
-                            position={[userLocation.lat, userLocation.lng]}
-                            icon={markerIcon}
-                          />
-                          <Routing
-                            userLocation={userLocation}
-                            complaintLocation={{
-                              lat: getComplaintCoordinates(item.complaint).latitude,
-                              lng: getComplaintCoordinates(item.complaint).longitude,
-                            }}
-                          />
-                        </MapContainer>
+                        <MapComponent
+                          destination={{
+                            lat: getComplaintCoordinates(item.complaint).latitude,
+                            lng: getComplaintCoordinates(item.complaint).longitude,
+                          }}
+                          readOnly
+                          mapHeight={300}
+                        />
                       </div>
+                    ) : (
+                      <p className="mt-4 text-xs text-amber-700">Citizen location map not available for this complaint.</p>
                     )}
                   </article>
                   ))
