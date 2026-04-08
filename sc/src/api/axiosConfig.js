@@ -7,29 +7,29 @@ const isLocalhost =
   typeof window !== 'undefined' &&
   ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
 
-const rawApiBaseUrl = isLocalhost
-  ? 'http://localhost:8088'
-  : configuredApiBaseUrl && configuredApiBaseUrl.trim()
+const deployedApiOrigin =
+  configuredApiBaseUrl && configuredApiBaseUrl.trim()
     ? configuredApiBaseUrl.trim()
     : fallbackBaseUrl
 
-let normalizedApiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '')
+let deployedImageOrigin =
+  configuredImageBaseUrl && configuredImageBaseUrl.trim()
+    ? configuredImageBaseUrl.trim()
+    : deployedApiOrigin
 
 // Prevent mixed-content failures in deployment when frontend runs on HTTPS.
 if (
   !isLocalhost &&
   typeof window !== 'undefined' &&
   window.location.protocol === 'https:' &&
-  normalizedApiBaseUrl.startsWith('http://')
+  deployedImageOrigin.startsWith('http://')
 ) {
-  normalizedApiBaseUrl = normalizedApiBaseUrl.replace('http://', 'https://')
+  deployedImageOrigin = deployedImageOrigin.replace('http://', 'https://')
 }
 
-export const API_BASE_URL = normalizedApiBaseUrl
-export const IMAGE_BASE_URL =
-  (configuredImageBaseUrl && configuredImageBaseUrl.trim()
-    ? configuredImageBaseUrl.trim()
-    : API_BASE_URL).replace(/\/+$/, '')
+// On deployment, route requests through Vercel rewrite (/api/*) to avoid browser CORS failures.
+export const API_BASE_URL = isLocalhost ? 'http://localhost:8088' : '/api'
+export const IMAGE_BASE_URL = (isLocalhost ? 'http://localhost:8088' : deployedImageOrigin).replace(/\/+$/, '')
 
 const api = axios.create({
   baseURL: API_BASE_URL,
