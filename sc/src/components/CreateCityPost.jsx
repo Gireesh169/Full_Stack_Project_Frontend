@@ -1,7 +1,64 @@
 import { useState } from 'react'
-import axios from 'axios'
 import { toast } from 'react-toastify'
-import { API_BASE_URL } from '../api/axiosConfig'
+import { createPostMultipart } from '../api/cityPostApi'
+
+const TARGET_UPLOAD_BYTES = 900 * 1024
+const MAX_IMAGE_SIDE = 1400
+
+const loadImageFromFile = (file) =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file)
+    const image = new Image()
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(image)
+    }
+
+    image.onerror = (error) => {
+      URL.revokeObjectURL(objectUrl)
+      reject(error)
+    }
+
+    image.src = objectUrl
+  })
+
+const canvasToBlob = (canvas, quality) =>
+  new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality)
+  })
+
+const compressImageIfNeeded = async (file) => {
+  if (!file || file.size <= TARGET_UPLOAD_BYTES) return file
+
+  const image = await loadImageFromFile(file)
+  const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(image.naturalWidth, image.naturalHeight))
+
+  const width = Math.max(1, Math.round(image.naturalWidth * scale))
+  const height = Math.max(1, Math.round(image.naturalHeight * scale))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+
+  const context = canvas.getContext('2d')
+  if (!context) return file
+
+  context.drawImage(image, 0, 0, width, height)
+
+  let quality = 0.85
+  let blob = await canvasToBlob(canvas, quality)
+
+  while (blob && blob.size > TARGET_UPLOAD_BYTES && quality > 0.45) {
+    quality -= 0.1
+    blob = await canvasToBlob(canvas, quality)
+  }
+
+  if (!blob) return file
+
+  const safeName = file.name.replace(/\.[^.]+$/, '') || 'upload'
+  return new File([blob], `${safeName}.jpg`, { type: 'image/jpeg' })
+}
 
 const CreateCityPost = ({ userId, onSuccess, onCancel }) => {
   const [title, setTitle] = useState('')
@@ -19,21 +76,23 @@ const CreateCityPost = ({ userId, onSuccess, onCancel }) => {
       return
     }
 
-    const formData = new FormData()
-    formData.append('title', title)
-    formData.append('description', description)
-    formData.append('location', location)
-    formData.append('category', category)
-    formData.append('image', file)
-
-    console.log([...formData.entries()])
-
     try {
       setLoading(true)
 
-      const response = await axios.post(`${API_BASE_URL}/posts/create/${userId ?? 1}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const uploadFile = await compressImageIfNeeded(file)
+      if (uploadFile.size > TARGET_UPLOAD_BYTES) {
+        toast.error('Please choose a smaller image')
+        return
+      }
+
+      const formData = new FormData()
+      formData.append('title', title)
+      formData.append('description', description)
+      formData.append('location', location)
+      formData.append('category', category)
+      formData.append('image', uploadFile)
+
+      const response = await createPostMultipart(userId ?? 1, formData)
 
       console.log(response.data)
 
@@ -47,7 +106,12 @@ const CreateCityPost = ({ userId, onSuccess, onCancel }) => {
       if (onSuccess) onSuccess()
     } catch (error) {
       console.error(error)
-      toast.error('Upload failed')
+      const backendMessage =
+        (typeof error?.response?.data === 'string' && error.response.data) ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Upload failed'
+      toast.error(backendMessage)
     } finally {
       setLoading(false)
     }

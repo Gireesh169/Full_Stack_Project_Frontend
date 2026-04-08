@@ -8,6 +8,117 @@ import { useAuth } from '../context/AuthContext'
 import { formatDateTime } from '../utils/date'
 
 const categories = ['ALL', 'FLOOD', 'EVENT', 'ROAD', 'POWER', 'GENERAL']
+const FALLBACK_IMAGE_SRC =
+  "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='700' viewBox='0 0 1200 700'%3E%3Crect width='1200' height='700' fill='%23e2e8f0'/%3E%3Ctext x='600' y='340' text-anchor='middle' font-family='Arial, sans-serif' font-size='44' font-weight='700' fill='%23475569'%3ENo Image Available%3C/text%3E%3C/svg%3E"
+
+const resolvePostImageCandidates = (post) => {
+  const rawImageUrl = String(post?.imageUrl ?? post?.imagePath ?? post?.image ?? '').trim()
+  if (!rawImageUrl) return []
+
+  const candidateSet = new Set()
+  const addCandidate = (value) => {
+    if (value && typeof value === 'string') candidateSet.add(value)
+  }
+
+  addCandidate(rawImageUrl)
+
+  if (rawImageUrl.startsWith('http')) {
+    try {
+      const parsedUrl = new URL(rawImageUrl)
+      const apiOrigin = new URL(API_BASE_URL)
+      const localhostHosts = ['localhost', '127.0.0.1', '::1']
+
+      if (localhostHosts.includes(parsedUrl.hostname)) {
+        addCandidate(parsedUrl.toString())
+
+        parsedUrl.protocol = apiOrigin.protocol
+        parsedUrl.hostname = apiOrigin.hostname
+        parsedUrl.port = apiOrigin.port
+        addCandidate(parsedUrl.toString())
+
+        const alternatePort = parsedUrl.port === '8088' ? '8080' : '8088'
+        parsedUrl.port = alternatePort
+        addCandidate(parsedUrl.toString())
+      }
+    } catch {
+      addCandidate(rawImageUrl)
+    }
+  } else {
+    const normalizedPath = rawImageUrl.replace(/^\/+/, '')
+    try {
+      addCandidate(new URL(normalizedPath, API_BASE_URL).toString())
+      addCandidate(new URL(normalizedPath, window.location.origin).toString())
+    } catch {
+      addCandidate(`${API_BASE_URL}/${normalizedPath}`)
+      addCandidate(`/${normalizedPath}`)
+    }
+  }
+
+  return [...candidateSet]
+}
+
+const PostImage = ({ post }) => {
+  const imageSources = resolvePostImageCandidates(post)
+  const [displaySrc, setDisplaySrc] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadImage = async () => {
+      setDisplaySrc('')
+      setIsLoading(true)
+
+      for (const candidate of imageSources) {
+        const loaded = await new Promise((resolve) => {
+          const image = new Image()
+          image.onload = () => resolve(candidate)
+          image.onerror = () => resolve('')
+          image.src = candidate
+        })
+
+        if (cancelled) return
+
+        if (loaded) {
+          setDisplaySrc(loaded)
+          setIsLoading(false)
+          return
+        }
+      }
+
+      if (!cancelled) {
+        setDisplaySrc(FALLBACK_IMAGE_SRC)
+        setIsLoading(false)
+      }
+    }
+
+    loadImage()
+
+    return () => {
+      cancelled = true
+    }
+  }, [imageSources.join('|')])
+
+  return (
+    <div className="relative h-[220px] w-full overflow-hidden bg-slate-100">
+      {isLoading ? <div className="absolute inset-0 animate-pulse bg-slate-200" /> : null}
+      {displaySrc ? (
+        <img
+          src={displaySrc}
+          alt={post?.title ? `${post.title} photo` : 'post photo'}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <img
+          src={FALLBACK_IMAGE_SRC}
+          alt="No image"
+          className="h-full w-full object-cover"
+        />
+      )}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-slate-900/25 to-transparent" />
+    </div>
+  )
+}
 
 const Posts = () => {
   const { user } = useAuth()
@@ -136,49 +247,7 @@ const Posts = () => {
               className="overflow-hidden rounded-xl bg-white shadow-md transition duration-300 hover:scale-105 hover:shadow-xl"
             >
               <div className="relative">
-                {console.log('IMAGE URL:', post?.imageUrl)}
-                {(() => {
-                  const rawImageUrl = typeof post?.imageUrl === 'string' ? post.imageUrl.trim() : ''
-                  let imageSrc = ''
-
-                  if (rawImageUrl.startsWith('http')) {
-                    try {
-                      const parsedUrl = new URL(rawImageUrl)
-                      if (parsedUrl.hostname === 'localhost') {
-                        parsedUrl.port = '8086'
-                        imageSrc = parsedUrl.toString()
-                      } else {
-                        imageSrc = rawImageUrl
-                      }
-                    } catch {
-                      imageSrc = rawImageUrl
-                    }
-                  } else {
-                    imageSrc = `${API_BASE_URL}/${rawImageUrl.replace(/^\/+/, '')}`
-                  }
-
-                  console.log('IMAGE:', imageSrc)
-
-                  return rawImageUrl ? (
-                    <img
-                      src={imageSrc}
-                      alt="post"
-                      style={{ width: '100%', height: '220px', objectFit: 'cover' }}
-                      className="rounded-t-xl"
-                      onError={(e) => {
-                        e.currentTarget.onerror = null
-                        e.currentTarget.src = 'https://via.placeholder.com/300x200?text=No+Image'
-                      }}
-                    />
-                  ) : (
-                    <img
-                      src="https://via.placeholder.com/300x200?text=No+Image"
-                      alt="No image"
-                      style={{ width: '100%', height: '220px', objectFit: 'cover' }}
-                      className="rounded-t-xl"
-                    />
-                  )
-                })()}
+                <PostImage post={post} />
                 <span className="absolute left-3 top-3 rounded-full bg-black/70 px-3 py-1 text-xs font-bold text-white">
                   {post.category}
                 </span>
