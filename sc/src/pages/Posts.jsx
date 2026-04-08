@@ -47,7 +47,6 @@ const resolvePostImageCandidates = (post) => {
     const normalizedPath = rawImageUrl.replace(/^\/+/, '')
     try {
       addCandidate(new URL(normalizedPath, API_BASE_URL).toString())
-      addCandidate(new URL(normalizedPath, window.location.origin).toString())
     } catch {
       addCandidate(`${API_BASE_URL}/${normalizedPath}`)
       addCandidate(`/${normalizedPath}`)
