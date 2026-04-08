@@ -275,15 +275,42 @@ const AddFoodItem = ({ refreshToken = 0 }) => {
         return
       }
 
-      const formData = new FormData()
-      formData.append('name', name)
-      formData.append('price', price)
-      formData.append('restaurantId', restaurantId)
-      formData.append('image', uploadFile)
+      const endpointCandidates = [
+        `${API_BASE_URL}/food/create`,
+        `${API_BASE_URL}/food/add`,
+      ]
 
-      const response = await axios.post(`${API_BASE_URL}/food/create`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const buildFormData = (imageKey) => {
+        const formData = new FormData()
+        formData.append('name', name)
+        formData.append('foodName', name)
+        formData.append('price', price)
+        formData.append('cost', price)
+        formData.append('restaurantId', restaurantId)
+        formData.append('restaurant_id', restaurantId)
+        formData.append(imageKey, uploadFile)
+        return formData
+      }
+
+      const imageKeys = ['image', 'file', 'foodImage']
+      let response = null
+      let lastError = null
+
+      for (const endpoint of endpointCandidates) {
+        for (const imageKey of imageKeys) {
+          try {
+            response = await axios.post(endpoint, buildFormData(imageKey))
+            break
+          } catch (requestError) {
+            lastError = requestError
+          }
+        }
+        if (response) break
+      }
+
+      if (!response) {
+        throw lastError ?? new Error('Failed to add food item')
+      }
 
       saveFoodToCache(response.data, restaurantId)
       alert('Food item added!')
