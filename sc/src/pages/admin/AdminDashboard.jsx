@@ -131,7 +131,7 @@ const AdminDashboard = () => {
         cityInfoRes,
         weatherRes,
         usersRes,
-      ] = await Promise.all([
+      ] = await Promise.allSettled([
         getAllComplaints(),
         getAllEmployees(),
         getAllTasks(),
@@ -142,14 +142,34 @@ const AdminDashboard = () => {
         getAllUsers(),
       ])
 
-      setComplaints(complaintsRes.data)
-      setEmployees(employeesRes.data)
-      setTasks(tasksRes.data)
-      setPosts(postsRes.data)
-      setPerformances(performanceRes.data)
-      setCityInfo(cityInfoRes.data)
-      setWeather(weatherRes.data)
-      setUsers(usersRes.data)
+      const fromSettled = (result) =>
+        result.status === 'fulfilled' ? (Array.isArray(result.value?.data) ? result.value.data : []) : []
+
+      setComplaints(fromSettled(complaintsRes))
+      setEmployees(fromSettled(employeesRes))
+      setTasks(fromSettled(tasksRes))
+      setPosts(fromSettled(postsRes))
+      setPerformances(fromSettled(performanceRes))
+      setCityInfo(fromSettled(cityInfoRes))
+      setWeather(fromSettled(weatherRes))
+      setUsers(fromSettled(usersRes))
+
+      const failedSections = [
+        ['complaints', complaintsRes],
+        ['employees', employeesRes],
+        ['tasks', tasksRes],
+        ['posts', postsRes],
+        ['performance', performanceRes],
+        ['city info', cityInfoRes],
+        ['weather', weatherRes],
+        ['users', usersRes],
+      ]
+        .filter(([, result]) => result.status === 'rejected')
+        .map(([name]) => name)
+
+      if (failedSections.length > 0) {
+        toast.error(`Some admin sections failed to load: ${failedSections.join(', ')}`)
+      }
     } catch {
       toast.error('Failed to load admin dashboard data')
     } finally {

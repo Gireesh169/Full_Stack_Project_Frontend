@@ -97,6 +97,14 @@ const EmployeeOrders = () => {
         }
 
         if (!userEmail) {
+          const fallbackId = String(authUser?.id ?? loggedUser?.id ?? '')
+          if (fallbackId) {
+            localStorage.setItem('employeeId', fallbackId)
+            console.log('Employee ID (fallback):', fallbackId)
+            setEmployeeId(fallbackId)
+            return
+          }
+
           console.log('Employee ID: null')
           setEmployeeId(null)
           return
@@ -115,16 +123,31 @@ const EmployeeOrders = () => {
           return
         }
 
+        const fallbackId = String(authUser?.id ?? loggedUser?.id ?? '')
+        if (fallbackId) {
+          localStorage.setItem('employeeId', fallbackId)
+          console.log('Employee ID (fallback):', fallbackId)
+          setEmployeeId(fallbackId)
+          return
+        }
+
         console.log('Employee ID: null')
         setEmployeeId(null)
       } catch (error) {
         console.error('Failed to resolve employeeId:', error)
+        const fallbackId = String(authUser?.id ?? '')
+        if (fallbackId) {
+          localStorage.setItem('employeeId', fallbackId)
+          setEmployeeId(fallbackId)
+          return
+        }
+
         setEmployeeId(null)
       }
     }
 
     resolveEmployeeId()
-  }, [])
+  }, [authUser?.id])
 
   // Fetch employee orders
   const fetchEmployeeOrders = useCallback(async () => {

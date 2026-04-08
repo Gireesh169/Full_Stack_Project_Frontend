@@ -35,6 +35,7 @@ const Login = () => {
 
       // If employee, resolve and store the real Employee table ID.
       if (normalizedRole === 'employee') {
+        const fallbackEmployeeId = String(loggedUser.id)
         try {
           const { data: employeeByUser } = await getEmployeeByUserId(loggedUser.id)
           const employee = employeeByUser?.id ? employeeByUser : null
@@ -50,10 +51,13 @@ const Login = () => {
 
             if (matched?.id) {
               localStorage.setItem('employeeId', String(matched.id))
+            } else {
+              localStorage.setItem('employeeId', fallbackEmployeeId)
             }
           }
         } catch (error) {
-          localStorage.removeItem('employeeId')
+          // Keep app usable in deployment even if employee lookup endpoint fails.
+          localStorage.setItem('employeeId', fallbackEmployeeId)
           console.error('Login - Could not resolve employeeId:', error)
         }
       } else {
