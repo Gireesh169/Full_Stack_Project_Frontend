@@ -6,7 +6,7 @@ import { employeeUpdateComplaintStatus } from '../../api/complaintsApi'
 import { getAllEmployees } from '../../api/employeeApi'
 import { getEmployeeByUserId } from '../../api/employeeApi'
 import { getPerformanceByEmployeeId } from '../../api/performanceApi'
-import { getTasksByEmployee, updateTaskStatus } from '../../api/taskApi'
+import { getAllTasks, getTasksByEmployee, updateTaskStatus } from '../../api/taskApi'
 import { EmployeeTaskBar } from '../../components/charts/DashboardCharts'
 import Loader from '../../components/Loader'
 import { useAuth } from '../../context/AuthContext'
@@ -83,12 +83,42 @@ const EmployeeDashboard = () => {
     setLoading(true)
     try {
       const employeeId = await resolveEmployeeId()
+      localStorage.setItem('employeeId', String(employeeId))
 
       const possibleIds = [...new Set([Number(employeeId), Number(user.id)].filter(Boolean))]
       const taskResponses = await Promise.allSettled(possibleIds.map((id) => getTasksByEmployee(id)))
-      const mergedTasks = taskResponses
+      const tasksFromEmployeeEndpoints = taskResponses
         .filter((response) => response.status === 'fulfilled')
         .flatMap((response) => response.value.data ?? [])
+
+      let mergedTasks = tasksFromEmployeeEndpoints
+
+      // Fallback for deployments where employee-task route maps differently.
+      if (mergedTasks.length === 0) {
+        const allTasksResponse = await getAllTasks()
+        const allTasks = Array.isArray(allTasksResponse?.data) ? allTasksResponse.data : []
+        const userEmail = String(user.email ?? '').toLowerCase()
+
+        mergedTasks = allTasks.filter((task) => {
+          const candidateIds = [
+            task?.employee?.id,
+            task?.employeeId,
+            task?.assignedEmployeeId,
+            task?.complaint?.assignedEmployeeId,
+            task?.complaint?.employeeId,
+            task?.complaint?.user?.id,
+          ]
+
+          const matchesId = candidateIds.some((value) =>
+            possibleIds.includes(Number(value)),
+          )
+
+          const taskEmail = String(task?.employee?.email ?? '').toLowerCase()
+          const matchesEmail = Boolean(userEmail) && taskEmail === userEmail
+
+          return matchesId || matchesEmail
+        })
+      }
 
       const uniqueTasks = Array.from(new Map(mergedTasks.map((task) => [task.id, task])).values())
       setTasks(uniqueTasks)
