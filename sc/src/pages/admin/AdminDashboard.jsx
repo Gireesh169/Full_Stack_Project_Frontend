@@ -7,7 +7,7 @@ import { approveComplaint, getAllComplaints } from '../../api/complaintsApi'
 import { addEmployee, deleteEmployee, getAllEmployees } from '../../api/employeeApi'
 import { getAllPerformance, postPerformance } from '../../api/performanceApi'
 import { getAllPosts } from '../../api/cityPostApi'
-import { getAllTasks, postTaskAssignment } from '../../api/taskApi'
+import { deleteTask, getAllTasks, postTaskAssignment } from '../../api/taskApi'
 import { getAllUsers, deleteUser } from '../../api/userApi'
 import { addWeather, deleteWeather, getAllWeather } from '../../api/weatherApi'
 import { AdminCategoryPie, AdminMonthlyTrendLine } from '../../components/charts/DashboardCharts'
@@ -623,7 +623,15 @@ const AdminDashboard = () => {
                                     if (existingEmployeeId && existingEmployeeId === selectedEmployeeId) {
                                       toast.info('Complaint already assigned to this employee')
                                     } else {
-                                      toast.error('Complaint already assigned. Resolve current assignment before reassigning.')
+                                      runWithRefresh(
+                                        async () => {
+                                          await deleteTask(existingTask.id)
+                                          const employeeCatalogId = await resolveEmployeeCatalogId(selectedEmployeeId)
+                                          await postTaskAssignment(Number(item.id), employeeCatalogId, Number(user.id))
+                                        },
+                                        'Complaint reassigned to employee',
+                                        'Failed to reassign complaint',
+                                      )
                                     }
                                     return
                                   }
