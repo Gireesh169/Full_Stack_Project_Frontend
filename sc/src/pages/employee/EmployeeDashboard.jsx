@@ -62,21 +62,43 @@ const EmployeeDashboard = () => {
   const [locationForm, setLocationForm] = useState({ latitude: '', longitude: '', type: 'flood' })
 
   const resolveEmployeeId = useCallback(async () => {
+    const storedEmployeeId = localStorage.getItem('employeeId')
+
     try {
       const employeeByUser = await getEmployeeByUserId(user.id)
       const employeeRecord = employeeByUser?.data
       if (employeeRecord?.id) {
         return employeeRecord.id
       }
-
-      const { data } = await getAllEmployees()
-      const matchedEmployee = data.find(
-        (employee) => employee.email?.toLowerCase() === user.email?.toLowerCase(),
-      )
-      return matchedEmployee?.id ?? user.id
     } catch {
-      return user.id
+      // Some deployments do not expose user->employee lookup endpoint.
+      // Continue with catalog fallback instead of returning early.
     }
+
+    try {
+      const { data } = await getAllEmployees()
+      const list = Array.isArray(data) ? data : []
+      const userEmail = String(user.email ?? '').toLowerCase()
+      const userName = String(user.name ?? '').toLowerCase()
+
+      const matchedEmployee = list.find((employee) => {
+        const employeeEmail = String(employee?.email ?? '').toLowerCase()
+        const employeeName = String(employee?.name ?? '').toLowerCase()
+        return (userEmail && employeeEmail === userEmail) || (userName && employeeName === userName)
+      })
+
+      if (matchedEmployee?.id) {
+        return matchedEmployee.id
+      }
+    } catch {
+      // Fall through to stored/user id fallback.
+    }
+
+    if (storedEmployeeId) {
+      return Number(storedEmployeeId)
+    }
+
+    return user.id
   }, [user.id, user.email])
 
   const fetchData = useCallback(async () => {
