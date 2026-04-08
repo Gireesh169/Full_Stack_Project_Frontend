@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import L from 'leaflet'
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { toast } from 'react-toastify'
 import { API_BASE_URL } from '../api/axiosConfig'
 import 'leaflet/dist/leaflet.css'
-import 'leaflet-routing-machine'
-import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 
@@ -57,91 +55,68 @@ const FollowUserLocation = ({ userLocation }) => {
 }
 
 const RouteLayer = ({ userLocation, destination }) => {
+  const [routePoints, setRoutePoints] = useState([])
   const map = useMap()
-  const routingControlRef = useRef(null)
-  const hasErrorNotifiedRef = useRef(false)
 
   useEffect(() => {
-    if (routingControlRef.current) {
-      map.removeControl(routingControlRef.current)
-      routingControlRef.current = null
-    }
+    let cancelled = false
 
-    if (!userLocation || !destination) return
+    const fetchRoute = async () => {
+      if (!userLocation || !destination) {
+        setRoutePoints([])
+        return
+      }
 
-    if (!L.Routing || !L.Routing.control) {
-      console.log('Leaflet Routing Machine is not available')
-      return
-    }
+      const origin = `${userLocation.lng},${userLocation.lat}`
+      const target = `${destination.lng},${destination.lat}`
+      const candidateUrls = [
+        `https://router.project-osrm.org/route/v1/driving/${origin};${target}?overview=full&geometries=geojson`,
+        `https://routing.openstreetmap.de/routed-car/route/v1/driving/${origin};${target}?overview=full&geometries=geojson`,
+      ]
 
-    const serviceUrls = [
-      'https://router.project-osrm.org/route/v1',
-      'https://routing.openstreetmap.de/routed-car/route/v1',
-    ]
-
-    const createRoutingControl = (serviceUrl) =>
-      L.Routing.control({
-        waypoints: [L.latLng(userLocation.lat, userLocation.lng), L.latLng(destination.lat, destination.lng)],
-        router: L.Routing.osrmv1({ serviceUrl, profile: 'driving' }),
-        routeWhileDragging: false,
-        addWaypoints: false,
-        draggableWaypoints: false,
-        fitSelectedRoutes: true,
-        show: false,
-        lineOptions: {
-          styles: [{ color: '#0f766e', opacity: 0.9, weight: 5 }],
-        },
-        createMarker: () => null,
-      }).addTo(map)
-
-    let serviceIndex = 0
-    const attachHandlers = () => {
-      if (!routingControlRef.current) return
-
-      routingControlRef.current.on('routesfound', (event) => {
-        console.log('Route found:', event.routes?.[0]?.summary)
-        hasErrorNotifiedRef.current = false
-      })
-
-      routingControlRef.current.on('routingerror', (event) => {
-        console.log('Routing error:', event.error)
-
-        if (routingControlRef.current) {
-          map.removeControl(routingControlRef.current)
-          routingControlRef.current = null
+      for (const url of candidateUrls) {
+        try {
+          const { data } = await axios.get(url)
+          const coordinates = data?.routes?.[0]?.geometry?.coordinates
+          if (!cancelled && Array.isArray(coordinates) && coordinates.length > 1) {
+            setRoutePoints(coordinates.map(([lng, lat]) => [lat, lng]))
+            return
+          }
+        } catch {
+          // Try next routing service.
         }
+      }
 
-        serviceIndex += 1
-        if (serviceIndex < serviceUrls.length) {
-          routingControlRef.current = createRoutingControl(serviceUrls[serviceIndex])
-          attachHandlers()
-          return
-        }
-
-        // Keep the map usable even if external routing APIs are unavailable.
-        if (!hasErrorNotifiedRef.current) {
-          console.warn('Routing services unavailable; showing map without road path.')
-          hasErrorNotifiedRef.current = true
-        }
-      })
-    }
-
-    routingControlRef.current = createRoutingControl(serviceUrls[serviceIndex])
-    attachHandlers()
-
-    return () => {
-      if (routingControlRef.current) {
-        map.removeControl(routingControlRef.current)
-        routingControlRef.current = null
+      if (!cancelled) {
+        setRoutePoints([
+          [userLocation.lat, userLocation.lng],
+          [destination.lat, destination.lng],
+        ])
       }
     }
-  }, [map, userLocation, destination])
 
-  return null
+    fetchRoute()
+
+    return () => {
+      cancelled = true
+    }
+  }, [userLocation, destination])
+
+  useEffect(() => {
+    if (routePoints.length < 2) return
+
+    const bounds = L.latLngBounds(routePoints)
+    map.fitBounds(bounds, { padding: [40, 40] })
+  }, [map, routePoints])
+
+  if (!userLocation || !destination || routePoints.length < 2) return null
+
+  return <Polyline positions={routePoints} pathOptions={{ color: '#0f766e', weight: 5, opacity: 0.9 }} />
 }
 
 const MapComponent = ({
   destination = null,
+  routeOrigin = null,
   onDestinationSelect = null,
   onLocationSelect = null,
   readOnly = false,
@@ -192,11 +167,6 @@ const MapComponent = ({
     return () => navigator.geolocation.clearWatch(id)
   }, [])
 
-  const center = useMemo(() => {
-    if (userLocation) return [userLocation.lat, userLocation.lng]
-    return defaultCenter
-  }, [userLocation])
-
   const activeDestination = useMemo(() => {
     if (
       destination &&
@@ -216,6 +186,28 @@ const MapComponent = ({
 
     return null
   }, [destination, clickedDestination])
+
+  const activeOrigin = useMemo(() => {
+    if (
+      routeOrigin &&
+      Number.isFinite(Number(routeOrigin.lat)) &&
+      Number.isFinite(Number(routeOrigin.lng))
+    ) {
+      return { lat: Number(routeOrigin.lat), lng: Number(routeOrigin.lng) }
+    }
+
+    if (userLocation) {
+      return { lat: Number(userLocation.lat), lng: Number(userLocation.lng) }
+    }
+
+    return null
+  }, [routeOrigin, userLocation])
+
+  const center = useMemo(() => {
+    if (activeOrigin) return [activeOrigin.lat, activeOrigin.lng]
+    if (activeDestination) return [activeDestination.lat, activeDestination.lng]
+    return defaultCenter
+  }, [activeDestination, activeOrigin])
 
   const routeStart = useMemo(() => {
     if (!userLocation) return null
@@ -255,9 +247,9 @@ const MapComponent = ({
         />
       )}
       <FollowUserLocation userLocation={userLocation} />
-      <RouteLayer userLocation={routeStart} destination={activeDestination} />
+      <RouteLayer userLocation={activeOrigin ?? routeStart} destination={activeDestination} />
 
-      {userLocation && <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocationIcon} />}
+      {activeOrigin && <Marker position={[activeOrigin.lat, activeOrigin.lng]} icon={userLocationIcon} />}
 
       {activeDestination && <Marker position={[activeDestination.lat, activeDestination.lng]} />}
 

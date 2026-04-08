@@ -3,7 +3,7 @@ import axios from 'axios'
 import './food-ordering.css'
 import MapComponent from '../MapComponent'
 import { cancelOrder as cancelOrderApi, getUserOrders } from '../../api/orderApi'
-import { API_BASE_URL } from '../../api/axiosConfig'
+import { API_BASE_URL, resolveImageUrl } from '../../api/axiosConfig'
 
 const getRestaurantId = (restaurant) => restaurant?.id ?? restaurant?.restaurantId
 const RESTAURANTS_CACHE_KEY = 'food_restaurants_cache'
@@ -57,6 +57,9 @@ const readRestaurantsCache = () => {
     return []
   }
 }
+
+const fallbackImage =
+  "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='420' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%23e2e8f0'/%3E%3Ctext x='400' y='220' text-anchor='middle' font-family='Arial, sans-serif' font-size='30' font-weight='700' fill='%23475569'%3ENo Image%3C/text%3E%3C/svg%3E"
 
 const RestaurantList = () => {
   const [restaurants, setRestaurants] = useState([])
@@ -318,14 +321,18 @@ const RestaurantList = () => {
         foodId: item.id,
         latitude: selectedLocation.lat,
         longitude: selectedLocation.lng,
+        lat: selectedLocation.lat,
+        lng: selectedLocation.lng,
         deliveryAddress: selectedLocation.address,
+        address: selectedLocation.address,
+        deliveryLocation: selectedLocation.address,
         restaurantId,
         totalAmount: item.price,
       }
 
       for (const url of createEndpoints) {
         try {
-          await axios.post(url, null, {
+          await axios.post(url, orderPayload, {
             params: orderPayload,
           })
           placed = true
@@ -376,9 +383,13 @@ const RestaurantList = () => {
                   className={`food-restaurant-card ${isSelected ? 'food-restaurant-card-active' : ''}`.trim()}
                 >
                 <img
-                  src={restaurant.imagePath}
+                  src={resolveImageUrl(restaurant.imagePath) || fallbackImage}
                   alt={restaurant.name ?? 'Restaurant'}
                   className="food-restaurant-image"
+                  onError={(event) => {
+                    event.currentTarget.onerror = null
+                    event.currentTarget.src = fallbackImage
+                  }}
                 />
                 <h3 className="food-restaurant-name">{restaurant.name}</h3>
                 <button
@@ -447,7 +458,16 @@ const RestaurantList = () => {
                       className="food-item-row"
                     >
                       <div className="food-item-main">
-                        <img src={item.imagePath} width="120" alt={item.name} className="food-item-image" />
+                        <img
+                          src={resolveImageUrl(item.imagePath) || fallbackImage}
+                          width="120"
+                          alt={item.name}
+                          className="food-item-image"
+                          onError={(event) => {
+                            event.currentTarget.onerror = null
+                            event.currentTarget.src = fallbackImage
+                          }}
+                        />
                         <div className="food-item-info">
                           <p className="food-item-name">{item.name}</p>
                           <p className="food-item-price">${Number(item.price).toFixed(2)}</p>

@@ -31,6 +31,36 @@ if (
 export const API_BASE_URL = isLocalhost ? 'http://localhost:8088' : '/api'
 export const IMAGE_BASE_URL = (isLocalhost ? 'http://localhost:8088' : deployedImageOrigin).replace(/\/+$/, '')
 
+export const resolveImageUrl = (value) => {
+  const rawValue = String(value ?? '').trim()
+  if (!rawValue) return ''
+
+  if (rawValue.startsWith('http')) {
+    try {
+      const parsedUrl = new URL(rawValue)
+      const imageOrigin = new URL(IMAGE_BASE_URL)
+
+      if (['localhost', '127.0.0.1', '::1'].includes(parsedUrl.hostname)) {
+        parsedUrl.protocol = imageOrigin.protocol
+        parsedUrl.hostname = imageOrigin.hostname
+        parsedUrl.port = imageOrigin.port
+        return parsedUrl.toString()
+      }
+    } catch {
+      return rawValue
+    }
+
+    return rawValue
+  }
+
+  const normalizedPath = rawValue.replace(/^\/+/, '')
+  try {
+    return new URL(normalizedPath, IMAGE_BASE_URL).toString()
+  } catch {
+    return `${IMAGE_BASE_URL}/${normalizedPath}`
+  }
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
 })

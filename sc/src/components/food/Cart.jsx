@@ -10,14 +10,28 @@ const Cart = ({ cartItems, onClearCart }) => {
       return
     }
 
+    const selectedAddress = 'User address'
+
     try {
       await axios.post(`${API_BASE_URL}/orders/create`, {
-        order: {
+        userId: 1,
+        totalAmount,
+        deliveryAddress: selectedAddress,
+        address: selectedAddress,
+        deliveryLocation: selectedAddress,
+        latitude: null,
+        longitude: null,
+        lat: null,
+        lng: null,
+        items: cartItems,
+      }, {
+        params: {
           userId: 1,
           totalAmount,
-          address: 'User address',
+          deliveryAddress: selectedAddress,
+          address: selectedAddress,
+          deliveryLocation: selectedAddress,
         },
-        items: cartItems,
       })
 
       alert('Order placed successfully')

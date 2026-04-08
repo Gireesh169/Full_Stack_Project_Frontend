@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { API_BASE_URL } from '../../api/axiosConfig'
+import { API_BASE_URL, resolveImageUrl } from '../../api/axiosConfig'
 import Cart from './Cart'
 
 const getId = (item) => item?.id ?? item?.foodId ?? item?.itemId
+const fallbackImage =
+  "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='420' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%23e2e8f0'/%3E%3Ctext x='400' y='220' text-anchor='middle' font-family='Arial, sans-serif' font-size='30' font-weight='700' fill='%23475569'%3ENo Image%3C/text%3E%3C/svg%3E"
 
 const FoodMenu = ({ restaurantId: restaurantIdProp }) => {
   const navigate = useNavigate()
@@ -103,9 +105,13 @@ const FoodMenu = ({ restaurantId: restaurantIdProp }) => {
             return (
               <div key={itemId} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <img
-                  src={item.imagePath}
+                  src={resolveImageUrl(item.imagePath) || fallbackImage}
                   alt={item.name ?? item.foodName ?? 'Food item'}
                   className="h-36 w-full rounded-lg object-cover"
+                  onError={(event) => {
+                    event.currentTarget.onerror = null
+                    event.currentTarget.src = fallbackImage
+                  }}
                 />
                 <h3 className="mt-3 text-base font-bold text-slate-900">{item.name ?? item.foodName}</h3>
                 <p className="mt-1 text-sm text-slate-600">${Number(item.price ?? item.cost ?? 0).toFixed(2)}</p>

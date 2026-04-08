@@ -13,6 +13,9 @@ const EmployeeOrders = () => {
   const [updatingOrderId, setUpdatingOrderId] = useState(null)
   const [employeeId, setEmployeeId] = useState(() => localStorage.getItem('employeeId'))
   const [selectedMapOrder, setSelectedMapOrder] = useState(null)
+  const [selectedMapOrigin, setSelectedMapOrigin] = useState(null)
+  const [selectedMapDestination, setSelectedMapDestination] = useState(null)
+  const [resolvingMapDestination, setResolvingMapDestination] = useState(false)
   const [startedDeliveryIds, setStartedDeliveryIds] = useState([])
 
   const isOrderAssignedToEmployee = useCallback(
@@ -237,17 +240,82 @@ const EmployeeOrders = () => {
   }
 
   const getDeliveryAddress = (order) => {
-    return order.deliveryAddress ?? order.address ?? 'Address unavailable'
+    return (
+      order.deliveryAddress ??
+      order.address ??
+      order.deliveryLocation ??
+      order.delivery_location ??
+      order.shippingAddress ??
+      order.shipping_address ??
+      'Address unavailable'
+    )
   }
 
   const getCoordinates = (order) => {
-    const lat = Number(order.latitude)
-    const lng = Number(order.longitude)
+    const lat = Number(order.latitude ?? order.lat ?? order.deliveryLatitude ?? order.delivery_lat)
+    const lng = Number(order.longitude ?? order.lng ?? order.deliveryLongitude ?? order.delivery_lng)
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       return null
     }
     return { lat, lng }
   }
+
+  const resolveOrderDestination = useCallback(async (order) => {
+    const coordinates = getCoordinates(order)
+    if (coordinates) return coordinates
+
+    const address = String(getDeliveryAddress(order)).trim()
+    if (!address || address === 'Address unavailable') return null
+
+    try {
+      const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
+        params: {
+          format: 'jsonv2',
+          limit: 1,
+          q: address,
+        },
+      })
+
+      const result = Array.isArray(data) ? data[0] : null
+      if (!result) return null
+
+      const lat = Number(result.lat)
+      const lng = Number(result.lon)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+
+      return { lat, lng }
+    } catch (error) {
+      console.error('Failed to resolve delivery address:', error)
+      return null
+    }
+  }, [])
+
+  const resolveRestaurantOrigin = useCallback(async (order) => {
+    const restaurantLocation = String(order?.restaurant?.location ?? order?.restaurantLocation ?? '').trim()
+    if (!restaurantLocation) return null
+
+    try {
+      const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
+        params: {
+          format: 'jsonv2',
+          limit: 1,
+          q: restaurantLocation,
+        },
+      })
+
+      const result = Array.isArray(data) ? data[0] : null
+      if (!result) return null
+
+      const lat = Number(result.lat)
+      const lng = Number(result.lon)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+
+      return { lat, lng }
+    } catch (error) {
+      console.error('Failed to resolve restaurant origin:', error)
+      return null
+    }
+  }, [])
 
   return (
     <div className="space-y-4">
@@ -302,15 +370,23 @@ const EmployeeOrders = () => {
                 </div>
 
                 <div className="mt-4 flex gap-2">
-                  {getCoordinates(order) && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedMapOrder(order)}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                    >
-                      View Location
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setSelectedMapOrder(order)
+                      setResolvingMapDestination(true)
+                      const [origin, destination] = await Promise.all([
+                        resolveRestaurantOrigin(order),
+                        resolveOrderDestination(order),
+                      ])
+                      setSelectedMapOrigin(origin)
+                      setSelectedMapDestination(destination)
+                      setResolvingMapDestination(false)
+                    }}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                  >
+                    View Location
+                  </button>
 
                   {showStartDelivery && (
                     <button
@@ -348,7 +424,12 @@ const EmployeeOrders = () => {
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/60 p-4"
           role="presentation"
-          onClick={() => setSelectedMapOrder(null)}
+          onClick={() => {
+            setSelectedMapOrder(null)
+              setSelectedMapOrigin(null)
+            setSelectedMapDestination(null)
+            setResolvingMapDestination(false)
+          }}
         >
           <div
             className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
@@ -364,18 +445,29 @@ const EmployeeOrders = () => {
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedMapOrder(null)}
+                onClick={() => {
+                  setSelectedMapOrder(null)
+                  setSelectedMapOrigin(null)
+                  setSelectedMapDestination(null)
+                  setResolvingMapDestination(false)
+                }}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
               >
                 Close
               </button>
             </div>
 
-            <MapComponent
-              destination={getCoordinates(selectedMapOrder)}
-              readOnly
-              mapHeight={360}
-            />
+            {resolvingMapDestination ? (
+              <div className="flex h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-600">
+                Resolving delivery route...
+              </div>
+            ) : selectedMapDestination ? (
+              <MapComponent routeOrigin={selectedMapOrigin} destination={selectedMapDestination} readOnly mapHeight={360} />
+            ) : (
+              <div className="flex h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-600">
+                Delivery location unavailable for this order.
+              </div>
+            )}
           </div>
         </div>
       )}
